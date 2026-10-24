@@ -16,6 +16,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -34,6 +35,12 @@ SCALES = (0.95, 1.0, 1.05)
 
 Region = tuple[float, float, float, float]
 
+REQUIRED_TEMPLATES = {
+    "admin_yes", "game_menu_leave", "deploy_button", "roles_confirm", "switch_team", "server_row",
+    "browser_search", "browser_refresh", "menu_enlist", "browser_join", "faction_nva", "squad_join",
+    "infantry_create",
+}
+
 
 def bundled_templates_dir() -> Path:
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -49,7 +56,8 @@ def load_templates(*dirs: Path) -> dict[str, list[np.ndarray]]:
         overridden: set[str] = set()
         for file in sorted(directory.glob("*.png")):
             name = file.stem.split(".")[0]
-            image = cv2.imread(str(file), cv2.IMREAD_GRAYSCALE)
+            # imdecode copes with non-ASCII paths (e.g. accented user names); imread doesn't
+            image = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
             if image is None:
                 continue
             if name not in overridden:
@@ -154,56 +162,71 @@ class Vision:
 
 
 class Screen(Vision):
-    """The real screen and input. Tests swap this for a fake with the same methods."""
+    """The real screen and input. Tests swap this for a fake with the same methods.
 
-    def __init__(self) -> None:
-        _make_dpi_aware()
+    ``rect`` returns where the game is drawn (left, top, width, height), or
+    None to fall back to the primary monitor; it's asked on every refresh so
+    resolution changes and other monitors are followed.
+    """
+
+    def __init__(self, rect: Callable[[], tuple[int, int, int, int] | None] = lambda: None) -> None:
+        from . import winapi
         import mss
-        import pydirectinput
 
+        winapi.make_dpi_aware()
         raw = load_templates(bundled_templates_dir(), app_dir() / "templates")
         log.info("Loaded templates: %s", ", ".join(sorted(raw)) or "none")
+        missing = REQUIRED_TEMPLATES - raw.keys()
+        if missing:
+            raise RuntimeError(f"Missing button images: {', '.join(sorted(missing))}")
         super().__init__(raw)
+        self._win = winapi
         self._mss = mss.mss()
-        self._monitor = self._mss.monitors[1]
-        self._input = pydirectinput
-        pydirectinput.FAILSAFE = True  # slam the mouse into a corner to abort
-        pydirectinput.PAUSE = 0.05
+        self._rect = rect
+        self._area = self._primary()
+        self._black_ticks = 0
+
+    def _primary(self) -> dict:
+        monitors = self._mss.monitors[1:]
+        return next((m for m in monitors if m["left"] == 0 and m["top"] == 0), monitors[0])
 
     def refresh(self) -> None:
         """Takes a new screenshot; find/find_all use it until the next refresh."""
-        shot = np.asarray(self._mss.grab(self._monitor))
-        self.set_frame(cv2.cvtColor(shot, cv2.COLOR_BGRA2GRAY), self._monitor["left"], self._monitor["top"])
+        rect = self._rect()
+        if rect:
+            left, top, width, height = rect
+            self._area = {"left": left, "top": top, "width": width, "height": height}
+        else:
+            self._area = self._primary()
+        shot = cv2.cvtColor(np.asarray(self._mss.grab(self._area)), cv2.COLOR_BGRA2GRAY)
+        self._black_ticks = self._black_ticks + 1 if shot.max() < 16 else 0
+        if self._black_ticks == 10:
+            log.warning("Screen captures are coming back black. Set the game's display mode "
+                        "to Borderless / Windowed Fullscreen.")
+        self.set_frame(shot, self._area["left"], self._area["top"])
 
     # Acting
 
     def click(self, pos: tuple[int, int]) -> None:
-        self._input.moveTo(*pos)
-        time.sleep(0.15)
-        self._input.click()
-        self._input.moveTo(self._monitor["left"] + 5, self._monitor["top"] + self._monitor["height"] // 2)
+        self._win.click_at(*pos)
+        time.sleep(0.1)
+        # Park the cursor at the edge so hover highlights don't change the next match.
+        self._win.move_cursor(self._area["left"] + 5, self._area["top"] + self._area["height"] // 2)
 
     def type_text(self, text: str) -> None:
-        self._input.typewrite(text, interval=0.05)
+        self._win.type_text(text)
 
     def press(self, key: str) -> None:
-        self._input.press(key)
+        self._win.press(key)
 
     def hold(self, key: str, seconds: float) -> None:
-        self._input.keyDown(key)
+        self._win.key_down(key)
         time.sleep(seconds)
-        self._input.keyUp(key)
+        self._win.key_up(key)
 
     def save_screenshot(self, path: Path) -> None:
-        shot = np.asarray(self._mss.grab(self._monitor))
-        cv2.imwrite(str(path), cv2.cvtColor(shot, cv2.COLOR_BGRA2BGR))
-
-
-def _make_dpi_aware() -> None:
-    """So screenshots and clicks use real pixels under Windows display scaling."""
-    try:
-        import ctypes
-
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[attr-defined]
-    except (AttributeError, OSError):
-        pass
+        self.refresh()
+        shot = cv2.cvtColor(np.asarray(self._mss.grab(self._area)), cv2.COLOR_BGRA2BGR)
+        ok, data = cv2.imencode(".png", shot)
+        if ok:
+            data.tofile(str(path))

@@ -7,44 +7,57 @@ What joining looks like in this version:
   SWITCH TEAM is available) -> Edit Roles (F confirms) -> Deployment
   (F deploys at the selected HQ) -> in game.
 
-Admin messages pop up with a "[Y] YES" button, and Esc opens a game menu.
-Each tick looks at the screen, works out which of these it is, and does the
-one thing that moves it forward. So the same code handles a fresh launch,
-a kick back to the main menu, a new map and a death.
+Admin messages pop up with a "[Y] YES" button, and Esc opens a game menu;
+both are overlays that can show up in game too. Each tick looks at the
+screen, works out which of these it is, and does the one thing that moves
+it forward. So the same code handles a fresh launch, a kick back to the
+main menu, a new map and a death.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Callable
 
 log = logging.getLogger(__name__)
 
 # Screens in the order they're checked. Overlays come first.
+OVERLAYS = ("admin_yes", "game_menu_leave")
 SCREENS = [
-    "admin_yes",
-    "game_menu_leave",
+    *OVERLAYS,
     "deploy_button",
     "roles_confirm",
     "switch_team",
     "server_row",
     "browser_search",
+    "browser_refresh",
     "menu_enlist",
 ]
 
-# Parts of the Units screen (fractions of the screen, 16:9 layout).
+# Parts of the Units screen (fractions of the game area, 16:9 layout).
 INFANTRY_COLUMN = (0.29, 0.10, 0.53, 0.95)
 INFANTRY_CREATE = (0.29, 0.10, 0.53, 0.22)
 FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 
+REFRESH_EVERY = 20  # seconds between server list refreshes while our server is missing
+
+
+class Stopped(Exception):
+    """The player asked the seeder to stop."""
+
 
 class Clock:
+    def __init__(self, stop: threading.Event | None = None):
+        self.stop = stop or threading.Event()
+
     def monotonic(self) -> float:
         return time.monotonic()
 
     def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
+        if self.stop.wait(seconds):
+            raise Stopped()
 
 
 def current_screen(screen) -> str | None:
@@ -61,52 +74,73 @@ class Navigator:
 
     ``side`` is called whenever a team decision comes up and returns the
     team that needs players ("allies" or "axis"), or None to keep the
-    game's pick.
+    game's pick. ``focus`` brings the game to the front and says whether it
+    is; no input is sent while it isn't. ``alive`` says whether the game is
+    still running.
     """
 
-    def __init__(self, screen, config, clock: Clock, side: Callable[[], str | None]):
+    def __init__(self, screen, config, clock: Clock, side: Callable[[], str | None],
+                 focus: Callable[[], bool] = lambda: True, alive: Callable[[], bool] = lambda: True):
         self.screen = screen
         self.config = config
         self.clock = clock
         self.side = side
+        self.focus = focus
+        self.alive = alive
         self.switched_team = False
+        self._tried: list[tuple[int, int]] = []
+        self._last_refresh = float("-inf")
 
-    def get_in(self, timeout: float) -> bool:
-        """Returns True once deployed, False if it didn't get there in time."""
+    def get_in(self, timeout: float, fresh_launch: bool = False) -> bool:
+        """Returns True once deployed (or back in game), False if that didn't
+        happen in time or the game closed.
+
+        ``fresh_launch`` means the game was just started, so a blank screen
+        is the splash waiting for a key rather than gameplay.
+        """
         deadline = self.clock.monotonic() + timeout
-        seen_menu = False
+        seen: set[str] = set()
         deployed = False
         quiet_ticks = 0
-        last = None
         while self.clock.monotonic() < deadline:
-            name = current_screen(self.screen)
-            if name is None:
-                if deployed:
-                    quiet_ticks += 1
-                    if quiet_ticks >= 3:
-                        log.info("Deployed")
-                        return True
-                elif not seen_menu:
-                    # Splash or "press any button"; harmless on loading screens.
-                    self.screen.press("space")
+            if not self.alive():
+                log.warning("The game closed while getting into the server")
+                return False
+            if not self.focus():
                 self.clock.sleep(2)
                 continue
-            seen_menu = True
+            name = current_screen(self.screen)
+            if name is None:
+                in_game = deployed or (not fresh_launch and seen <= set(OVERLAYS))
+                if in_game:
+                    quiet_ticks += 1
+                    if quiet_ticks >= 3:
+                        log.info("In game")
+                        return True
+                elif fresh_launch and not seen - set(OVERLAYS):
+                    self.screen.press("space")  # splash / "press any button"
+                self.clock.sleep(2)
+                continue
             quiet_ticks = 0
-            if name != last:
+            if name not in seen:
                 log.info("On screen: %s", name)
-                last = name
-            if name == "deploy_button":
-                deployed = True
-            getattr(self, "_on_" + name)()
+            seen.add(name)
+            if name not in OVERLAYS:
+                deployed = name == "deploy_button"
+            if name != "switch_team":
+                self._tried.clear()
+            self.handle(name)
             self.clock.sleep(2)
-        log.warning("Couldn't get into the server within %ss", timeout)
+        log.warning("Couldn't get into the server within %ss", round(timeout))
         return False
+
+    def handle(self, name: str) -> None:
+        getattr(self, "_on_" + name)()
 
     # One handler per screen in SCREENS.
 
     def _on_admin_yes(self) -> None:
-        self.screen.press("y")
+        self.screen.click(self.screen.find("admin_yes"))
 
     def _on_game_menu_leave(self) -> None:
         self.screen.press("esc")
@@ -126,14 +160,18 @@ class Navigator:
             self.switched_team = True
             self.screen.click(self.screen.find("switch_team"))
             return
-        squad = self.screen.find("squad_join", INFANTRY_COLUMN)
-        if squad:
-            log.info("Joining an infantry squad")
-            self.screen.click(squad)
-            return
+        # Join the first infantry squad not tried yet on this visit; a full
+        # or locked one leaves us here, so the next tick tries another.
+        for squad in sorted(self.screen.find_all("squad_join", INFANTRY_COLUMN), key=lambda p: p[1]):
+            if all(abs(squad[0] - t[0]) > 15 or abs(squad[1] - t[1]) > 15 for t in self._tried):
+                log.info("Joining an infantry squad")
+                self._tried.append(squad)
+                self.screen.click(squad)
+                return
         create = self.screen.find("infantry_create", INFANTRY_CREATE)
         if create:
             log.info("No open squad; creating one")
+            self._tried.clear()
             self.screen.click(create)
 
     def _on_server_row(self) -> None:
@@ -148,7 +186,15 @@ class Navigator:
         self.clock.sleep(0.5)
         self.screen.type_text(self.config.server_search)
         self.screen.press("enter")
+        self._last_refresh = self.clock.monotonic()
         self.clock.sleep(2)
+
+    def _on_browser_refresh(self) -> None:
+        # Searched, but our server isn't listed (yet): it may be restarting.
+        if self.clock.monotonic() - self._last_refresh >= REFRESH_EVERY:
+            log.info("Server not in the list; refreshing")
+            self.screen.press("r")
+            self._last_refresh = self.clock.monotonic()
 
     def _on_menu_enlist(self) -> None:
         self.screen.click(self.screen.find("menu_enlist"))

@@ -32,19 +32,26 @@ def setup_logging() -> None:
 
 
 def run_seed(config: Config) -> int:
-    from . import crcon, instance, runner
+    import threading
+
+    from . import crcon, instance, runner, winapi
+    from .flow import Clock, Stopped
     from .game import Game
     from .screen import Screen
 
     if not instance.claim():
         log.info("Another seeding run is already going; exiting")
         return 0
+    stop = threading.Event()
+    winapi.listen_for_stop_hotkey(stop)
+    log.info("Seeding. Press Ctrl+Alt+End to stop.")
+    game = Game(config)
     try:
-        outcome = runner.seed(config, Game(config), Screen(), crcon.fetch)
-    except Exception as exc:  # no console in the built exe, so make sure it's logged
-        if type(exc).__name__ == "FailSafeException":
-            log.info("Stopped: mouse moved to a screen corner")
-            return 0
+        outcome = runner.seed(config, game, Screen(game.rect), crcon.fetch, Clock(stop))
+    except Stopped:
+        log.info("Stopped")
+        return 0
+    except Exception:  # no console in the built exe, so make sure it's logged
         log.exception("Seeding crashed")
         return 2
     log.info("Done: %s", outcome.value)
@@ -77,13 +84,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     setup_logging()
+    try:
+        config = Config.load()
+    except (OSError, ValueError, TypeError) as exc:
+        log.error("Settings file %s is broken (%s); using defaults", app_dir() / "config.json", exc)
+        config = Config()
     if args.record:
         return run_record(args.minutes, args.every)
     if args.seed:
-        return run_seed(Config.load())
+        return run_seed(config)
     from . import window
 
-    return window.run(Config.load())
+    return window.run(config)
 
 
 if __name__ == "__main__":

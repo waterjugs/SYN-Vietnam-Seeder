@@ -67,7 +67,7 @@ class SetupWindow:
         self.status.grid(row=6, columnspan=4, sticky="w")
         footer = ttk.Frame(frame)
         footer.grid(row=7, columnspan=4, sticky="we", pady=(10, 0))
-        ttk.Label(footer, text=f"v{__version__}  ·  Move the mouse to a screen corner to stop a run",
+        ttk.Label(footer, text=f"v{__version__}  ·  Ctrl+Alt+End stops a run",
                   foreground="#888").grid(row=0, column=0, sticky="w")
         log_link = ttk.Label(footer, text="Open log", foreground="#2a6ebb", cursor="hand2")
         log_link.grid(row=1, column=0, sticky="w")
@@ -77,7 +77,8 @@ class SetupWindow:
 
     def _schedule_text(self) -> str:
         if schedule.is_scheduled():
-            return f"Seeds every day at {self.config.start_time} while you're signed in to Windows."
+            return (f"Seeds every day at {self.config.start_time}. Leave the PC on, signed in and "
+                    "unlocked; if it's asleep it runs when it wakes.")
         return "Not scheduled. Tick “Seed automatically” and Save."
 
     def _load_server(self) -> None:

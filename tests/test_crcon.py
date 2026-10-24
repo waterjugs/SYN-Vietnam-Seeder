@@ -33,3 +33,12 @@ def test_weaker_side():
 
 def test_fetch_returns_none_when_unreachable():
     assert crcon.fetch("http://127.0.0.1:9/nothing", timeout=1) is None
+
+
+def test_failed_response_is_an_error():
+    import pytest
+
+    with pytest.raises(ValueError):
+        crcon.parse({"result": None, "failed": True, "error": "rcon down"})
+    with pytest.raises(ValueError):
+        crcon.parse({"result": "oops", "failed": False})

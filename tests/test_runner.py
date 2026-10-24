@@ -51,9 +51,9 @@ def test_full_join_then_leaves_once_seeded():
     fetch = statuses(10, 10, 40, 79, 80)
     assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
     assert screen.typed == ["syndicate"]
-    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "squad_join"]
+    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "squad_join", "admin_yes"]
     assert screen.keys[:2] == ["space", "enter"]
-    assert ["y", "f", "f"] == [k for k in screen.keys if k in ("y", "f")]
+    assert [k for k in screen.keys if k == "f"] == ["f", "f"]
     assert game.launches == 1 and not game.is_running
 
 
@@ -78,7 +78,7 @@ def test_switches_to_the_short_team_once():
 def test_creates_a_squad_when_none_open():
     config, game, screen, clock = make()
     path = dict(HAPPY_PATH)
-    path["browser_join"] = ({"server_row", "browser_join"}, {"switch_team", "infantry_create"})
+    path["browser_join"] = ({"server_row", "browser_join", "browser_refresh"}, {"switch_team", "infantry_create"})
     screen.transitions = path
     runner.seed(config, game, screen, statuses(10, 80), clock)
     assert "infantry_create" in screen.clicks
@@ -128,12 +128,111 @@ def test_redeploys_after_death_or_new_map():
     assert screen.keys.count("f") == 3  # role, deploy, redeploy
 
 
-def test_closes_stray_game_menu():
+def test_overlays_in_game_are_closed_without_leaving():
+    config, game, screen, clock = make()
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            screen.visible = {"admin_yes"}
+        if calls["n"] == 5:
+            screen.visible = {"game_menu_leave"}
+        return ServerStatus("S", 80 if calls["n"] >= 8 else 20, 10, 10, 0)
+
+    assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
+    assert game.launches == 1 and game.closes == 1
+    assert screen.clicks.count("admin_yes") == 2  # once while joining, once in game
+    assert "esc" in screen.keys
+    assert screen.keys.count("space") == 1  # only the splash, never in game
+
+
+def test_no_input_while_game_is_not_in_front():
+    config, game, screen, clock = make()
+    game.focused = False
+    config.max_minutes = 15
+    runner.seed(config, game, screen, statuses(10), clock)
+    assert screen.clicks == [] and screen.keys == [] and screen.typed == []
+
+
+def test_crash_during_navigation_is_noticed_at_once():
     screen = FakeScreen(HAPPY_PATH)
-    screen.visible = {"game_menu_leave"}
+    screen.visible = {"menu_enlist"}
+    clock = FakeClock()
+    alive = iter([True, True, False])
+    nav = flow.Navigator(screen, Config(), clock, lambda: None, alive=lambda: next(alive))
+    assert not nav.get_in(timeout=600)
+    assert clock.now < 30
+
+
+def test_refreshes_when_server_is_missing():
+    screen = FakeScreen(HAPPY_PATH)
+    screen.visible = {"browser_refresh"}
+    clock = FakeClock()
+    nav = flow.Navigator(screen, Config(), clock, lambda: None)
+    assert not nav.get_in(timeout=100)
+    assert 4 <= screen.keys.count("r") <= 6  # every ~20 s, not every tick
+
+
+def test_tries_another_squad_when_one_is_full():
+    screen = FakeScreen({})
+    screen.visible = {"switch_team"}
+    squads = [(100, 300), (100, 360)]
+    screen.find_all = lambda name, region=None: squads if name == "squad_join" else []
+    screen.find = lambda name, region=None: (200, 100) if name == "infantry_create" else None
+    clicked = []
+    screen.click = clicked.append
     nav = flow.Navigator(screen, Config(), FakeClock(), lambda: None)
-    assert not nav.get_in(timeout=10)  # nothing to deploy, but...
-    assert screen.keys[0] == "esc"
+    for _ in range(3):
+        nav.handle("switch_team")
+    # Each squad once (both full), then make our own.
+    assert clicked == [(100, 300), (100, 360), (200, 100)]
+
+
+def test_skips_when_pc_locked():
+    config, game, screen, clock = make()
+    game.locked = True
+    assert runner.seed(config, game, screen, statuses(10), clock) is runner.Outcome.LOCKED
+    assert game.launches == 0
+
+
+def test_does_not_relaunch_near_the_time_limit():
+    config, game, screen, clock = make()
+    config.max_minutes = 20
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 25:  # crash with ~7 minutes left, less than a relaunch needs
+            game.is_running = False
+        return ServerStatus("S", 20, 10, 10, 0)
+
+    assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.TIMED_OUT
+    assert game.launches == 1
+    assert clock.now <= 20 * 60 + 60
+
+
+def test_gave_up_watches_for_a_late_game_start():
+    config, game, screen, clock = make(launch_ok=False)
+    runner.seed(config, game, screen, statuses(10), clock)
+    assert game.lingered == 90
+
+
+def test_stop_closes_the_game():
+    config, game, screen, clock = make()
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 4:
+            raise flow.Stopped()
+        return ServerStatus("S", 20, 10, 10, 0)
+
+    try:
+        runner.seed(config, game, screen, fetch, clock)
+    except flow.Stopped:
+        pass
+    assert not game.is_running
 
 
 def test_gives_up_when_game_wont_start():

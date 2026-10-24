@@ -24,7 +24,9 @@ class ServerStatus:
 
 
 def parse(payload: dict) -> ServerStatus:
-    result = payload["result"]
+    result = payload.get("result")
+    if payload.get("failed") or not isinstance(result, dict):
+        raise ValueError(f"CRCON reported a failure: {payload.get('error') or payload}")
     teams = result.get("player_count_by_team") or {}
     name = result.get("name") or {}
     return ServerStatus(
@@ -42,6 +44,6 @@ def fetch(url: str, timeout: float = 10) -> ServerStatus | None:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return parse(json.load(response))
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except Exception as exc:  # network, HTTP protocol or payload errors all mean "unknown"
         log.warning("Could not read server status from %s: %s", url, exc)
         return None

@@ -25,7 +25,7 @@ EPIC_MANIFEST = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / (
 def detect_epic_app_name(manifest: Path = EPIC_MANIFEST) -> str:
     """Finds HLL Vietnam's Epic AppName from the launcher's install list."""
     try:
-        installs = json.loads(manifest.read_text(encoding="utf-8"))["InstallationList"]
+        installs = json.loads(manifest.read_text(encoding="utf-8-sig"))["InstallationList"]
     except (OSError, ValueError, KeyError):
         return ""
     for entry in installs:
@@ -38,6 +38,7 @@ def detect_epic_app_name(manifest: Path = EPIC_MANIFEST) -> str:
 class Game:
     def __init__(self, config: Config):
         self.config = config
+        self._warned_focus = False
 
     def _matches(self, name: str) -> bool:
         if self.config.process_name:
@@ -53,6 +54,24 @@ class Game:
     def running(self) -> bool:
         return self.process() is not None
 
+    def unlocked(self) -> bool:
+        from . import winapi
+
+        return winapi.desktop_unlocked()
+
+    def window(self) -> int | None:
+        from . import winapi
+
+        proc = self.process()
+        return winapi.main_window(proc.pid) if proc else None
+
+    def rect(self) -> tuple[int, int, int, int] | None:
+        """Where the game is drawn on screen: (left, top, width, height)."""
+        from . import winapi
+
+        hwnd = self.window()
+        return winapi.client_rect(hwnd) if hwnd else None
+
     def launch_uri(self) -> str:
         if self.config.launcher == "epic":
             app = self.config.epic_app_name or detect_epic_app_name()
@@ -61,57 +80,60 @@ class Game:
             return f"com.epicgames.launcher://apps/{app}?action=launch&silent=true"
         return f"steam://rungameid/{self.config.steam_app_id}"
 
-    def launch(self) -> bool:
-        """Starts the game and waits for its process. Returns False on timeout."""
+    def launch(self, timeout: float | None = None) -> bool:
+        """Starts the game and waits for its window. Returns False on timeout."""
         uri = self.launch_uri()
         log.info("Launching the game via %s", uri)
         os.startfile(uri)  # type: ignore[attr-defined]  # Windows only
-        deadline = time.monotonic() + self.config.launch_timeout
+        timeout = self.config.launch_timeout if timeout is None else timeout
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            proc = self.process()
-            if proc:
-                if not self.config.process_name:
-                    log.info("Game process is %s", proc.name())
+            if self.window():
                 return True
             time.sleep(2)
-        log.error("The game didn't start within %ss", self.config.launch_timeout)
+        names = sorted({p.info["name"] for p in psutil.process_iter(["name"])
+                        if (p.info["name"] or "").lower().startswith("hll")})
+        log.error("The game window didn't appear within %ss (HLL processes running: %s)",
+                  timeout, ", ".join(names) or "none")
         return False
 
-    def focus(self) -> None:
-        """Brings the game window to the front so clicks and keys land in it."""
-        proc = self.process()
-        if proc:
-            _focus_pid(proc.pid)
+    def focus(self) -> bool:
+        """Brings the game to the front. True if it is the foreground window,
+        so keys and clicks will land in it."""
+        from . import winapi
 
-    def close(self) -> None:
-        proc = self.process()
-        if not proc:
-            return
+        hwnd = self.window()
+        if not hwnd:
+            return False
+        if winapi.bring_to_front(hwnd):
+            self._warned_focus = False
+            return True
+        if not self._warned_focus:
+            log.warning("Couldn't bring the game to the front; holding input until it is")
+            self._warned_focus = True
+        return False
+
+    def close(self, linger: float = 0) -> None:
+        """Ends the game. With ``linger``, keeps watching that long for a
+        late start (Steam can take minutes to launch after an update)."""
+        deadline = time.monotonic() + linger
+        while True:
+            proc = self.process()
+            if proc:
+                self._end(proc)
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(5)
+
+    def _end(self, proc: psutil.Process) -> None:
         log.info("Closing the game")
-        proc.terminate()
         try:
+            proc.terminate()
             proc.wait(timeout=30)
         except psutil.TimeoutExpired:
             proc.kill()
-
-
-def _focus_pid(pid: int) -> None:
-    import ctypes
-    from ctypes import wintypes
-
-    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-    found: list[int] = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def callback(hwnd, _):
-        owner = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid and user32.IsWindowVisible(hwnd):
-            found.append(hwnd)
-            return False
-        return True
-
-    user32.EnumWindows(callback, 0)
-    if found:
-        user32.ShowWindow(found[0], 9)  # SW_RESTORE
-        user32.SetForegroundWindow(found[0])
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.AccessDenied:
+            log.error("Can't close the game: it's running as administrator. Close it yourself, "
+                      "and don't run Steam as administrator.")

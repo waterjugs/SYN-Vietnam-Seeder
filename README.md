@@ -16,8 +16,9 @@ setup window are written; a live run on a real PC is next.
    **Seed automatically**, and press **Save**. That's it.
 
 It copies itself to `%LOCALAPPDATA%\SynSeeder` and adds a Windows
-scheduled task called *SynSeeder*. The PC needs to be on and you signed in
-at that time (it runs late if the PC was asleep). **Seed now** starts a run
+scheduled task called *SynSeeder*. The PC needs to be on, signed in and
+unlocked at that time (it runs late if the PC was asleep). Set the game to
+Borderless / Windowed Fullscreen so the seeder can see it. **Seed now** starts a run
 straight away and **Stop seeding** ends one and closes the game.
 
 ## What it does
@@ -31,7 +32,10 @@ straight away and **Stop seeding** ends one and closes the game.
 - Rejoins after a kick, redeploys on a new map, restarts the game after a
   crash (up to 3 times), and strafes now and then to dodge the idle kick.
 - Gives up after 4 hours whatever happens.
-- Move the mouse into a screen corner to stop it immediately.
+- Press **Ctrl+Alt+End** to stop a run (or use **Stop seeding** in the
+  window). It only sends keys while the game is the active window, so
+  alt-tabbing away pauses it rather than typing into your other apps.
+- Works with any keyboard layout (keys are looked up for your layout).
 
 Settings live in `%APPDATA%\SynSeeder\config.json` and the log in
 `%APPDATA%\SynSeeder\seeder.log`.

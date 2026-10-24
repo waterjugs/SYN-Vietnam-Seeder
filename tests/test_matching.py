@@ -19,6 +19,7 @@ EXPECTED = {
     "browser": "browser_search",
     "search": "server_row",
     "hover": "server_row",
+    "search_empty": "browser_refresh",  # edited copy of "search" with the row removed
     "units": "switch_team",
     "roles_msg": "admin_yes",
     "roles": "roles_confirm",

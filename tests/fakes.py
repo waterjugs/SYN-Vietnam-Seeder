@@ -75,18 +75,25 @@ class FakeGame:
     def running(self) -> bool:
         return self.is_running
 
-    def launch(self) -> bool:
+    def launch(self, timeout=None) -> bool:
         self.launches += 1
         if self.launch_ok:
             self.is_running = True
             self.screen.visible = {"splash"}
         return self.launch_ok
 
-    def focus(self) -> None:
-        pass
+    focused = True
+    locked = False
 
-    def close(self) -> None:
+    def focus(self) -> bool:
+        return self.is_running and self.focused
+
+    def unlocked(self) -> bool:
+        return not self.locked
+
+    def close(self, linger: float = 0) -> None:
         self.closes += 1
+        self.lingered = linger
         self.is_running = False
         self.screen.visible = set()
 
@@ -95,13 +102,14 @@ class FakeGame:
 # template the seeder looks for; it stands in for the press-any-button screen.
 HAPPY_PATH = {
     ("splash", "space"): ({"splash"}, {"menu_enlist"}),
-    "menu_enlist": ({"menu_enlist"}, {"browser_search", "browser_join"}),
+    "menu_enlist": ({"menu_enlist"}, {"browser_search", "browser_refresh", "browser_join"}),
     ("browser_search", "enter"): ({"browser_search"}, {"server_row"}),
-    "browser_join": ({"server_row", "browser_join"}, {"switch_team", "faction_nva", "squad_join", "infantry_create"}),
+    ("browser_refresh", "r"): (set(), set()),
+    "browser_join": ({"server_row", "browser_join", "browser_refresh"}, {"switch_team", "faction_nva", "squad_join", "infantry_create"}),
     "squad_join": ({"switch_team", "faction_nva", "squad_join", "infantry_create"}, {"roles_confirm", "admin_yes"}),
     "infantry_create": ({"switch_team", "faction_nva", "squad_join", "infantry_create"}, {"roles_confirm"}),
     "switch_team": ({"faction_nva"}, set()),
-    ("admin_yes", "y"): ({"admin_yes"}, set()),
+    "admin_yes": ({"admin_yes"}, set()),
     ("roles_confirm", "f"): ({"roles_confirm"}, {"deploy_button"}),
     ("deploy_button", "f"): ({"deploy_button"}, set()),
     ("game_menu_leave", "esc"): ({"game_menu_leave"}, set()),

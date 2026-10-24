@@ -19,6 +19,7 @@ BOXES = {
     "browser_search": ("browser", 1904, 184, 2082, 214),
     "server_row": ("search", 272, 288, 700, 318),
     "browser_join": ("search", 1641, 283, 1811, 339),
+    "browser_refresh": ("browser", 282, 1336, 394, 1373),  # text only; the key icon matches other hints
     "switch_team": ("units", 345, 1215, 527, 1242),
     "faction_nva": ("units", 74, 1173, 184, 1283),
     "squad_join": ("units", 1268, 286, 1318, 336),

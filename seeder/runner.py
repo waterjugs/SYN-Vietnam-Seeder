@@ -16,6 +16,7 @@ class Outcome(enum.Enum):
     SEEDED = "server is seeded"
     SERVER_DOWN = "server status unavailable"
     GAME_IN_USE = "game was already running, left it alone"
+    LOCKED = "PC is locked; seeding needs you signed in and unlocked"
     GAVE_UP = "couldn't get into the server"
     TIMED_OUT = "hit the time limit"
 
@@ -42,6 +43,8 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
     if game.running():
         # Someone is playing; don't take over their game.
         return Outcome.GAME_IN_USE
+    if not game.unlocked():
+        return Outcome.LOCKED
 
     latest = {"status": status}
 
@@ -49,23 +52,32 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         s = latest["status"]
         return s.weaker_side() if abs(s.allied - s.axis) >= 2 else None
 
-    nav = flow.Navigator(screen, config, clock, needy_side)
+    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running)
     deadline = clock.monotonic() + config.max_minutes * 60
     attempts = 0
     in_server = False
     last_nudge = clock.monotonic()
+    outcome = None
     try:
-        while clock.monotonic() < deadline:
+        while True:
+            remaining = deadline - clock.monotonic()
             if not in_server:
+                if remaining < config.launch_timeout + config.load_timeout:
+                    outcome = Outcome.TIMED_OUT
+                    return outcome
                 if attempts > config.max_restarts:
-                    return Outcome.GAVE_UP
+                    outcome = Outcome.GAVE_UP
+                    return outcome
                 attempts += 1
-                in_server = _get_in(config, game, nav)
+                in_server = _get_in(config, game, nav, remaining)
                 if not in_server:
                     game.close()
                     clock.sleep(15)
                     continue
                 last_nudge = clock.monotonic()
+            if remaining <= 0:
+                outcome = Outcome.TIMED_OUT
+                return outcome
 
             clock.sleep(config.poll_seconds)
             if not game.running():
@@ -77,23 +89,29 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
             count = latest["status"].player_count
             log.info("Players: %s/%s", count, config.seeded_threshold)
             if count >= config.seeded_threshold:
-                return Outcome.SEEDED
+                outcome = Outcome.SEEDED
+                return outcome
 
-            game.focus()
-            if flow.current_screen(screen) is not None:
+            if not game.focus():
+                continue  # someone else has the screen; send nothing
+            name = flow.current_screen(screen)
+            if name in flow.OVERLAYS:
+                nav.handle(name)
+            elif name is not None:
                 # Kicked to the menu, new map, or died: walk back in.
                 log.info("Not in game any more; getting back in")
-                in_server = nav.get_in(config.load_timeout)
+                in_server = nav.get_in(min(config.load_timeout, max(remaining, 1)))
             elif clock.monotonic() - last_nudge >= config.anti_afk_seconds:
                 flow.nudge(screen)
                 last_nudge = clock.monotonic()
-        return Outcome.TIMED_OUT
     finally:
-        game.close()
+        # Steam can start the game minutes late (e.g. after an update), so
+        # after a failed launch keep watching for it a little longer.
+        game.close(linger=90 if outcome is Outcome.GAVE_UP else 0)
 
 
-def _get_in(config, game, nav) -> bool:
-    if not game.running() and not game.launch():
+def _get_in(config, game, nav, remaining: float) -> bool:
+    fresh = not game.running()
+    if fresh and not game.launch(min(config.launch_timeout, remaining)):
         return False
-    game.focus()
-    return nav.get_in(config.launch_timeout + config.load_timeout)
+    return nav.get_in(min(config.launch_timeout + config.load_timeout, remaining), fresh_launch=fresh)
