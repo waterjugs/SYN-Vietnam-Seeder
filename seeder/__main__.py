@@ -1,6 +1,6 @@
 """Entry point for SynSeeder.exe.
 
-  SynSeeder.exe            seed now (the setup window comes in a later step)
+  SynSeeder.exe            setup window: start time, launcher, seed now/stop
   SynSeeder.exe --seed     seed now; what the scheduled task runs
   SynSeeder.exe --record   screenshot every few seconds while you click
                            through the menus yourself, to make templates
@@ -32,11 +32,21 @@ def setup_logging() -> None:
 
 
 def run_seed(config: Config) -> int:
-    from . import crcon, runner
+    from . import crcon, instance, runner
     from .game import Game
     from .screen import Screen
 
-    outcome = runner.seed(config, Game(config), Screen(), crcon.fetch)
+    if not instance.claim():
+        log.info("Another seeding run is already going; exiting")
+        return 0
+    try:
+        outcome = runner.seed(config, Game(config), Screen(), crcon.fetch)
+    except Exception as exc:  # no console in the built exe, so make sure it's logged
+        if type(exc).__name__ == "FailSafeException":
+            log.info("Stopped: mouse moved to a screen corner")
+            return 0
+        log.exception("Seeding crashed")
+        return 2
     log.info("Done: %s", outcome.value)
     return 0 if outcome in (runner.Outcome.SEEDED, runner.Outcome.ALREADY_SEEDED) else 1
 
@@ -69,7 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     if args.record:
         return run_record(args.minutes, args.every)
-    return run_seed(Config.load())
+    if args.seed:
+        return run_seed(Config.load())
+    from . import window
+
+    return window.run(Config.load())
 
 
 if __name__ == "__main__":

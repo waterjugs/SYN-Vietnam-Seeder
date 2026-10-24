@@ -6,9 +6,19 @@ the server has fewer than 80 players, it launches the game, joins through
 the in-game server browser, joins an infantry squad and deploys. It stays
 in until the server reaches 80, then closes the game.
 
-Status: early development. The seeding logic and button recognition are
-done and tested against real HLL Vietnam screenshots; the setup window and
-a live run on a real PC are next.
+Status: early development. Seeding logic, button recognition and the
+setup window are written; a live run on a real PC is next.
+
+## Using it
+
+1. Download `SynSeeder.exe` and double-click it.
+2. Pick the time to seed each day and Steam or Epic, tick
+   **Seed automatically**, and press **Save**. That's it.
+
+It copies itself to `%LOCALAPPDATA%\SynSeeder` and adds a Windows
+scheduled task called *SynSeeder*. The PC needs to be on and you signed in
+at that time (it runs late if the PC was asleep). **Seed now** starts a run
+straight away and **Stop seeding** ends one and closes the game.
 
 ## What it does
 
