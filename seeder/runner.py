@@ -43,6 +43,13 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         # Someone is playing; don't take over their game.
         return Outcome.GAME_IN_USE
 
+    latest = {"status": status}
+
+    def needy_side():
+        s = latest["status"]
+        return s.weaker_side() if abs(s.allied - s.axis) >= 2 else None
+
+    nav = flow.Navigator(screen, config, clock, needy_side)
     deadline = clock.monotonic() + config.max_minutes * 60
     attempts = 0
     in_server = False
@@ -53,11 +60,12 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
                 if attempts > config.max_restarts:
                     return Outcome.GAVE_UP
                 attempts += 1
-                in_server = _get_in(config, game, screen, status.weaker_side(), clock)
+                in_server = _get_in(config, game, nav)
                 if not in_server:
                     game.close()
                     clock.sleep(15)
                     continue
+                last_nudge = clock.monotonic()
 
             clock.sleep(config.poll_seconds)
             if not game.running():
@@ -65,14 +73,18 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
                 in_server = False
                 continue
 
-            status = fetch(config.crcon_url) or status
-            log.info("Players: %s/%s", status.player_count, config.seeded_threshold)
-            if status.player_count >= config.seeded_threshold:
+            latest["status"] = fetch(config.crcon_url) or latest["status"]
+            count = latest["status"].player_count
+            log.info("Players: %s/%s", count, config.seeded_threshold)
+            if count >= config.seeded_threshold:
                 return Outcome.SEEDED
 
             game.focus()
-            in_server = _keep_in(config, screen, status.weaker_side(), clock)
-            if in_server and clock.monotonic() - last_nudge >= config.anti_afk_seconds:
+            if flow.current_screen(screen) is not None:
+                # Kicked to the menu, new map, or died: walk back in.
+                log.info("Not in game any more; getting back in")
+                in_server = nav.get_in(config.load_timeout)
+            elif clock.monotonic() - last_nudge >= config.anti_afk_seconds:
                 flow.nudge(screen)
                 last_nudge = clock.monotonic()
         return Outcome.TIMED_OUT
@@ -80,21 +92,8 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         game.close()
 
 
-def _get_in(config, game, screen, side: str, clock: Clock) -> bool:
+def _get_in(config, game, nav) -> bool:
     if not game.running() and not game.launch():
         return False
     game.focus()
-    return flow.join_server(screen, config, clock) and flow.deploy(screen, side, config, clock)
-
-
-def _keep_in(config, screen, side: str, clock: Clock) -> bool:
-    """Handles kicks, new maps and deaths. Returns False if we're out."""
-    hit = screen.find_any(["menu_play", flow.TEAM_TEMPLATE[side], *flow.DEPLOY_STAGES])
-    if hit is None:
-        return True
-    if hit[0] == "menu_play":
-        log.info("Back at the main menu (kicked or disconnected); rejoining")
-        return flow.join_server(screen, config, clock) and flow.deploy(screen, side, config, clock)
-    log.info("On a deploy screen (new map or redeploy)")
-    flow.deploy(screen, side, config, clock, first_timeout=10)
-    return True
+    return nav.get_in(config.launch_timeout + config.load_timeout)

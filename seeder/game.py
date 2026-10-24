@@ -15,7 +15,7 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
-# The shipping exe for HLL Vietnam isn't confirmed yet, so match any HLL build.
+# Used when config.process_name is blank: any HLL build.
 DEFAULT_PROCESS_PATTERN = re.compile(r"^HLL.*-Win64-Shipping\.exe$", re.IGNORECASE)
 EPIC_MANIFEST = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / (
     r"Epic\UnrealEngineLauncher\LauncherInstalled.dat"
