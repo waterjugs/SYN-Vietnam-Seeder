@@ -81,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record", action="store_true", help="record screenshots for templates")
     parser.add_argument("--minutes", type=float, default=10, help="how long --record runs")
     parser.add_argument("--every", type=float, default=3, help="seconds between --record shots")
+    parser.add_argument("--max-minutes", type=int, help="with --seed: end the run after this long (for testing)")
     args = parser.parse_args(argv)
 
     setup_logging()
@@ -92,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.record:
         return run_record(args.minutes, args.every)
     if args.seed:
+        if args.max_minutes:
+            config.max_minutes = args.max_minutes
         return run_seed(config)
     from . import window
 
