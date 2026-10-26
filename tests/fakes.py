@@ -84,9 +84,13 @@ class FakeGame:
 
     focused = True
     locked = False
+    user_active = False  # with focused False: someone is using the PC
 
     def focus(self) -> bool:
         return self.is_running and self.focused
+
+    def waiting_for_user(self) -> bool:
+        return self.is_running and not self.focused and self.user_active
 
     def unlocked(self) -> bool:
         return not self.locked

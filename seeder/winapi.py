@@ -17,6 +17,7 @@ from ctypes import wintypes
 log = logging.getLogger(__name__)
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)  # type: ignore[attr-defined]
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
 
 INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, KEYEVENTF_SCANCODE = 0x2, 0x4, 0x8
@@ -24,6 +25,7 @@ MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x2, 0x4
 GW_OWNER = 4
 VK = {"space": 0x20, "enter": 0x0D, "esc": 0x1B, "backspace": 0x08, "alt": 0x12}
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x1, 0x2, 0x4000
+FLASHW_TRAY, FLASHW_TIMERNOFG = 0x2, 0xC
 VK_END = 0x23
 WM_HOTKEY = 0x0312
 
@@ -46,6 +48,15 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
 
 
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+
+class FLASHWINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("hwnd", wintypes.HWND), ("dwFlags", wintypes.DWORD),
+                ("uCount", wintypes.UINT), ("dwTimeout", wintypes.DWORD)]
+
+
 def _prototypes() -> None:
     """64-bit safe signatures; ctypes would otherwise truncate handles to int."""
     H, U, D = wintypes.HWND, wintypes.UINT, wintypes.DWORD
@@ -55,8 +66,12 @@ def _prototypes() -> None:
         "GetWindowThreadProcessId": ([H, ctypes.POINTER(D)], D),
         "IsWindowVisible": ([H], wintypes.BOOL),
         "IsIconic": ([H], wintypes.BOOL),
-        "ShowWindow": ([H, ctypes.c_int], wintypes.BOOL),
         "SetForegroundWindow": ([H], wintypes.BOOL),
+        "ShowWindowAsync": ([H, ctypes.c_int], wintypes.BOOL),
+        "IsHungAppWindow": ([H], wintypes.BOOL),
+        "AttachThreadInput": ([D, D, wintypes.BOOL], wintypes.BOOL),
+        "GetLastInputInfo": ([ctypes.POINTER(LASTINPUTINFO)], wintypes.BOOL),
+        "FlashWindowEx": ([ctypes.POINTER(FLASHWINFO)], wintypes.BOOL),
         "GetWindowRect": ([H, ctypes.POINTER(wintypes.RECT)], wintypes.BOOL),
         "GetClientRect": ([H, ctypes.POINTER(wintypes.RECT)], wintypes.BOOL),
         "ClientToScreen": ([H, ctypes.POINTER(wintypes.POINT)], wintypes.BOOL),
@@ -73,12 +88,53 @@ def _prototypes() -> None:
     for name, (args, res) in specs.items():
         fn = getattr(user32, name)
         fn.argtypes, fn.restype = args, res
+    for name, (args, res) in {"GetTickCount": ([], D), "GetCurrentThreadId": ([], D)}.items():
+        fn = getattr(kernel32, name)
+        fn.argtypes, fn.restype = args, res
 
 
 _prototypes()
 
+SW_RESTORE = 9
+# Windows counts the seeder's own input as activity too. So before sending
+# any, note whether the latest input was the player's; user_idle_seconds()
+# then uses that instead of ours. Ticks are GetTickCount() values.
+_own_input_tick: int | None = None
+_player_input_tick: int | None = None
+OWN_INPUT_SLACK_MS = 250  # how long after we send input Windows may stamp it
+# The window our input is for (the game, set by Game.focus()). Input is
+# dropped if another window has come to the front since, e.g. the player
+# clicked back into their browser halfway through typing the server name.
+_input_target: int | None = None
 
-def _send(*inputs: INPUT) -> None:
+
+def _ours(last_input: int, own_input: int | None) -> bool:
+    return own_input is not None and (last_input - own_input) & 0xFFFFFFFF <= OWN_INPUT_SLACK_MS
+
+
+def _mark_own_input() -> None:
+    global _own_input_tick, _player_input_tick
+    info = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
+    if user32.GetLastInputInfo(ctypes.byref(info)) and not _ours(info.dwTime, _own_input_tick):
+        _player_input_tick = info.dwTime
+    _own_input_tick = kernel32.GetTickCount()
+
+
+def set_input_target(hwnd: int | None) -> None:
+    global _input_target
+    _input_target = hwnd
+
+
+def _on_target() -> bool:
+    return not _input_target or user32.GetForegroundWindow() == _input_target
+
+
+def _send(*inputs: INPUT, always: bool = False) -> None:
+    """``always`` is for releasing keys and buttons: harmless in any window,
+    and they mustn't stay held down."""
+    if not always and not _on_target():
+        return
+    _mark_own_input()
     array = (INPUT * len(inputs))(*inputs)
     user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
 
@@ -136,18 +192,73 @@ def foreground_pid() -> int:
 
 
 def bring_to_front(hwnd: int) -> bool:
-    """Tries to make hwnd the foreground window. Returns True if it is."""
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    if user32.GetForegroundWindow() == hwnd:
-        return True
-    user32.SetForegroundWindow(hwnd)
+    """Asks Windows to make hwnd the foreground window. Returns True once it
+    is, and isn't minimised.
+
+    Windows refuses while someone is using another window, which is what we
+    want then (a minimised game stays minimised too); force_to_front() is
+    for when the PC has been left alone.
+    """
     if user32.GetForegroundWindow() != hwnd:
-        # Windows refuses focus changes unless the caller just had input;
-        # a tap of Alt counts, and doesn't do anything in the game.
-        _send(_key(vk=VK["alt"]), _key(vk=VK["alt"], flags=KEYEVENTF_KEYUP))
         user32.SetForegroundWindow(hwnd)
-    return user32.GetForegroundWindow() == hwnd
+        if user32.GetForegroundWindow() != hwnd:
+            return False
+    if user32.IsIconic(hwnd):
+        user32.ShowWindowAsync(hwnd, SW_RESTORE)  # async: a frozen game can't block us
+        return False  # ready on the next try
+    return True
+
+
+def force_to_front(hwnd: int, alt_tap: bool = True) -> bool:
+    """Makes hwnd the foreground window even though another program has it.
+    Only for when nobody is using the PC. Returns True if it worked."""
+    if user32.IsHungAppWindow(hwnd):
+        return False  # not answering messages; activating it could block us
+    if user32.IsIconic(hwnd):
+        user32.ShowWindowAsync(hwnd, SW_RESTORE)
+    if bring_to_front(hwnd):
+        return True
+    # Sharing input with the foreground window's thread lets us move focus.
+    foreground = user32.GetForegroundWindow()
+    theirs = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    ours = kernel32.GetCurrentThreadId()
+    attached = bool(theirs) and theirs != ours and bool(user32.AttachThreadInput(ours, theirs, True))
+    try:
+        user32.SetForegroundWindow(hwnd)
+        if alt_tap and user32.GetForegroundWindow() != hwnd:
+            # Last resort: Windows also allows it right after a key press.
+            # Nobody is typing, so the Alt tap can't land in their work.
+            _send(_key(vk=VK["alt"]), _key(vk=VK["alt"], flags=KEYEVENTF_KEYUP), always=True)
+            user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(ours, theirs, False)
+    return user32.GetForegroundWindow() == hwnd and not user32.IsIconic(hwnd)
+
+
+def user_idle_seconds() -> float:
+    """Seconds since the player last used the mouse or keyboard; the
+    seeder's own input doesn't count."""
+    info = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
+    if not user32.GetLastInputInfo(ctypes.byref(info)):
+        return 0.0
+    return idle_ms(kernel32.GetTickCount(), info.dwTime, _own_input_tick, _player_input_tick) / 1000
+
+
+def idle_ms(now: int, last_input: int, own_input: int | None, player_input: int | None) -> int:
+    """Milliseconds of player inactivity from GetTickCount() values, which
+    wrap around every 49.7 days."""
+    if _ours(last_input, own_input):
+        # The latest input was ours; the player's came before it.
+        last_input = player_input if player_input is not None else own_input
+    return (now - last_input) & 0xFFFFFFFF
+
+
+def flash(hwnd: int) -> None:
+    """Flashes the window's taskbar button until it comes to the front."""
+    info = FLASHWINFO(cbSize=ctypes.sizeof(FLASHWINFO), hwnd=hwnd,
+                      dwFlags=FLASHW_TRAY | FLASHW_TIMERNOFG, uCount=0, dwTimeout=0)
+    user32.FlashWindowEx(ctypes.byref(info))
 
 
 def desktop_unlocked() -> bool:
@@ -162,17 +273,20 @@ def desktop_unlocked() -> bool:
 # Input
 
 def click_at(x: int, y: int) -> None:
+    if not _on_target():
+        return  # leave the player's cursor alone
     user32.SetCursorPos(x, y)
     time.sleep(0.1)
     down = INPUT(type=INPUT_MOUSE, u=_INPUTUNION(mi=MOUSEINPUT(dwFlags=MOUSEEVENTF_LEFTDOWN)))
     up = INPUT(type=INPUT_MOUSE, u=_INPUTUNION(mi=MOUSEINPUT(dwFlags=MOUSEEVENTF_LEFTUP)))
     _send(down)
     time.sleep(0.05)
-    _send(up)
+    _send(up, always=True)
 
 
 def move_cursor(x: int, y: int) -> None:
-    user32.SetCursorPos(x, y)
+    if _on_target():
+        user32.SetCursorPos(x, y)
 
 
 def _scancode(key: str) -> int:
@@ -192,7 +306,7 @@ def key_down(key: str) -> None:
 
 
 def key_up(key: str) -> None:
-    _send(_key(scan=_scancode(key), flags=KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP))
+    _send(_key(scan=_scancode(key), flags=KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP), always=True)
 
 
 def press(key: str) -> None:

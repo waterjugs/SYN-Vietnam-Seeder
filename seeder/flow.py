@@ -88,19 +88,21 @@ class Navigator:
     team that needs players ("allies" or "axis"), or None to keep the
     game's pick. ``pick`` returns the team to choose on Select Force (the
     smaller one). ``focus`` brings the game to the front and says whether it
-    is; no input is sent while it isn't. ``alive`` says whether the game is
-    still running.
+    is; no input is sent while it isn't. ``waiting`` says whether that's
+    because someone is using the PC, which doesn't count against timeouts.
+    ``alive`` says whether the game is still running.
     """
 
     def __init__(self, screen, config, clock: Clock, side: Callable[[], str | None],
                  focus: Callable[[], bool] = lambda: True, alive: Callable[[], bool] = lambda: True,
-                 pick: Callable[[], str] = lambda: "allies"):
+                 pick: Callable[[], str] = lambda: "allies", waiting: Callable[[], bool] = lambda: False):
         self.screen = screen
         self.config = config
         self.clock = clock
         self.side = side
         self.pick = pick
         self.focus = focus
+        self.waiting = waiting
         self.alive = alive
         self.switched_team = False
         self._force_tries = 0
@@ -108,12 +110,14 @@ class Navigator:
         self._tried: list[tuple[int, int]] = []
         self._last_refresh = float("-inf")
 
-    def get_in(self, timeout: float, fresh_launch: bool = False) -> bool:
+    def get_in(self, timeout: float, fresh_launch: bool = False, until: float = float("inf")) -> bool:
         """Returns True once deployed (or back in game), False if that didn't
         happen in time or the game closed.
 
         ``fresh_launch`` means the game was just started, so a blank screen
-        is the splash waiting for a key rather than gameplay.
+        is the splash waiting for a key rather than gameplay. Time spent
+        waiting for someone to stop using the PC extends ``timeout``, but
+        never past ``until`` (a clock.monotonic() time).
         """
         deadline = self.clock.monotonic() + timeout
         # One team switch per trip in; a later rejoin may need another.
@@ -128,7 +132,11 @@ class Navigator:
                 log.warning("The game closed while getting into the server")
                 return False
             if not self.focus():
+                start = self.clock.monotonic()
                 self.clock.sleep(2)
+                if self.waiting():
+                    # The player has the PC; that isn't the game being stuck.
+                    deadline = min(deadline + self.clock.monotonic() - start, until)
                 continue
             name = current_screen(self.screen)
             if name is None:

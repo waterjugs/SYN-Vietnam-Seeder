@@ -40,6 +40,9 @@ straight away and **Stop seeding** ends one and closes the game.
 - Press **Ctrl+Alt+End** to stop a run (or use **Stop seeding** in the
   window). It only sends keys while the game is the active window, so
   alt-tabbing away pauses it rather than typing into your other apps.
+  Once the mouse and keyboard have been left alone for 15 seconds it
+  brings the game back to the front and carries on; the game's taskbar
+  button flashes while it waits for you.
 - Works with any keyboard layout (keys are looked up for your layout).
 
 Settings live in `%APPDATA%\SynSeeder\config.json` and the log in

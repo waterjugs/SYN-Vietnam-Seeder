@@ -296,6 +296,36 @@ def test_no_input_while_game_is_not_in_front():
     assert screen.clicks == [] and screen.keys == [] and screen.typed == []
 
 
+class BusyGame(FakeGame):
+    """Someone uses the PC (another window in front) until ``busy_until``."""
+
+    def __init__(self, screen, clock, busy_until):
+        super().__init__(screen)
+        self.clock, self.busy_until = clock, busy_until
+        self.user_active = True
+
+    @property
+    def focused(self):
+        return self.clock.now >= self.busy_until
+
+
+def test_waiting_for_someone_using_the_pc_does_not_use_up_the_join_time():
+    config, _, screen, clock = make()
+    game = BusyGame(screen, clock, config.launch_timeout + config.load_timeout + 600)
+    assert runner.seed(config, game, screen, statuses(10, 10, 80), clock) is runner.Outcome.SEEDED
+    assert game.launches == 1  # no give-up and relaunch while they were busy
+
+
+def test_waiting_for_someone_using_the_pc_still_ends_at_the_time_limit():
+    config, _, screen, clock = make()
+    config.max_minutes = 30
+    game = BusyGame(screen, clock, 10 * 60 * 60)
+    assert runner.seed(config, game, screen, statuses(10), clock) is runner.Outcome.TIMED_OUT
+    assert clock.now <= 30 * 60 + 60
+    assert game.launches == 1 and not game.is_running
+    assert screen.clicks == [] and screen.keys == []
+
+
 def test_crash_during_navigation_is_noticed_at_once():
     screen = FakeScreen(HAPPY_PATH)
     screen.visible = {"menu_enlist"}

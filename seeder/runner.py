@@ -62,7 +62,8 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         refresh_status(max_age=30)
         return latest["status"].weaker_side()
 
-    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running, pick=pick)
+    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running, pick=pick,
+                         waiting=game.waiting_for_user)
     deadline = clock.monotonic() + config.max_minutes * 60
     attempts = 0
     in_server = False
@@ -114,7 +115,7 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
             elif name is not None:
                 # Kicked to the menu, new map, or died: walk back in.
                 log.info("Not in game any more; getting back in")
-                in_server = nav.get_in(min(config.load_timeout, max(deadline - clock.monotonic(), 1)))
+                in_server = nav.get_in(min(config.load_timeout, max(deadline - clock.monotonic(), 1)), until=deadline)
             elif clock.monotonic() - last_nudge >= config.anti_afk_seconds:
                 flow.nudge(screen)
                 last_nudge = clock.monotonic()
@@ -130,4 +131,4 @@ def _get_in(config, game, nav, clock: Clock, deadline: float) -> bool:
     if fresh and not game.launch(min(config.launch_timeout, max(deadline - clock.monotonic(), 1))):
         return False
     left = max(deadline - clock.monotonic(), 1)  # what the launch didn't use
-    return nav.get_in(min(config.launch_timeout + config.load_timeout, left), fresh_launch=fresh)
+    return nav.get_in(min(config.launch_timeout + config.load_timeout, left), fresh_launch=fresh, until=deadline)

@@ -108,7 +108,8 @@ class SetupWindow:
             return
         self.save()
         _start_seed_process()
-        self.status.config(text="Seeding started. The game will open shortly.")
+        self.status.config(text="Seeding started. The game will open shortly; leave the "
+                                "mouse and keyboard alone while it joins.")
 
     def stop(self) -> None:
         if instance.stop_seeding():

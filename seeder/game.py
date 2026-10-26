@@ -20,6 +20,9 @@ DEFAULT_PROCESS_PATTERN = re.compile(r"^HLL.*-Win64-Shipping\.exe$", re.IGNORECA
 EPIC_MANIFEST = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / (
     r"Epic\UnrealEngineLauncher\LauncherInstalled.dat"
 )
+# Seconds without mouse or keyboard use before the seeder pulls the game in
+# front of whatever someone was doing; until then it waits for them.
+IDLE_BEFORE_TAKEOVER = 15
 
 
 def detect_epic_app_name(manifest: Path = EPIC_MANIFEST) -> str:
@@ -38,7 +41,8 @@ def detect_epic_app_name(manifest: Path = EPIC_MANIFEST) -> str:
 class Game:
     def __init__(self, config: Config):
         self.config = config
-        self._warned_focus = False
+        self._focus_wait: str | None = None  # why the game isn't in front, once logged
+        self._alt_tapped = False  # force_to_front's Alt tap, used once per wait
 
     def _matches(self, name: str) -> bool:
         if self.config.process_name:
@@ -99,19 +103,49 @@ class Game:
 
     def focus(self) -> bool:
         """Brings the game to the front. True if it is the foreground window,
-        so keys and clicks will land in it."""
+        so keys and clicks will land in it.
+
+        If someone is using another window, it waits for them: once the
+        mouse and keyboard have been idle for IDLE_BEFORE_TAKEOVER seconds it
+        takes the game to the front itself. Meanwhile the game's taskbar
+        button flashes to show it's waiting.
+        """
         from . import winapi
 
         hwnd = self.window()
         if not hwnd:
             return False
+        winapi.set_input_target(hwnd)  # input is dropped whenever this isn't in front
         if winapi.bring_to_front(hwnd):
-            self._warned_focus = False
+            self._in_front()
             return True
-        if not self._warned_focus:
-            log.warning("Couldn't bring the game to the front; holding input until it is")
-            self._warned_focus = True
+        idle = winapi.user_idle_seconds()
+        if idle >= IDLE_BEFORE_TAKEOVER:
+            if winapi.force_to_front(hwnd, alt_tap=not self._alt_tapped):
+                log.info("Brought the game to the front (mouse and keyboard idle for %ss)", round(idle))
+                self._in_front()
+                return True
+            self._alt_tapped = True
+            wait = "refused"
+        else:
+            wait = "in use"
+        if wait != self._focus_wait:
+            if wait == "in use":
+                log.warning("Another window is in front and the PC is in use; waiting until the mouse "
+                            "and keyboard have been idle for %ss", IDLE_BEFORE_TAKEOVER)
+                winapi.flash(hwnd)
+            else:
+                log.warning("Couldn't bring the game to the front; holding input until it is")
+            self._focus_wait = wait
         return False
+
+    def _in_front(self) -> None:
+        self._focus_wait = None
+        self._alt_tapped = False
+
+    def waiting_for_user(self) -> bool:
+        """True while focus() is holding off because someone is using the PC."""
+        return self._focus_wait == "in use"
 
     def close(self, linger: float = 0) -> None:
         """Ends the game. With ``linger``, keeps watching that long for a
