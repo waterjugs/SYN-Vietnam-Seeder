@@ -52,7 +52,8 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         s = latest["status"]
         return s.weaker_side() if abs(s.allied - s.axis) >= 2 else None
 
-    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running)
+    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running,
+                         pick=lambda: latest["status"].weaker_side())
     deadline = clock.monotonic() + config.max_minutes * 60
     attempts = 0
     in_server = False

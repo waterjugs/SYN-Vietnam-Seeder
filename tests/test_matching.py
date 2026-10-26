@@ -20,6 +20,7 @@ EXPECTED = {
     "search": "server_row",
     "hover": "server_row",
     "search_empty": "browser_refresh",  # edited copy of "search" with the row removed
+    "select_force": "select_force",  # assembled from native-res zooms of the live screen
     "units": "switch_team",
     "roles_msg": "admin_yes",
     "roles": "roles_confirm",
@@ -60,6 +61,17 @@ def test_units_screen_details(res):
     squad = screen.find("squad_join", flow.INFANTRY_COLUMN)
     assert squad and 0.29 * w < squad[0] < 0.53 * w
     assert screen.find("infantry_create", flow.INFANTRY_CREATE)
+
+
+@pytest.mark.parametrize("res", RESOLUTIONS)
+def test_select_force_cards(res):
+    w, h = RESOLUTIONS[res]
+    screen = ImageScreen(load("select_force", (w, h)))
+    screen.refresh()
+    us = screen.find(*flow.FORCE_CARDS["allies"])
+    nva = screen.find(*flow.FORCE_CARDS["axis"])
+    assert us and us[0] < w / 2
+    assert nva and nva[0] > w / 2
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)

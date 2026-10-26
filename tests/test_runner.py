@@ -51,7 +51,7 @@ def test_full_join_then_leaves_once_seeded():
     fetch = statuses(10, 10, 40, 79, 80)
     assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
     assert screen.typed == ["syndicate"]
-    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "squad_join", "admin_yes"]
+    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "admin_yes", "force_us", "squad_join"]
     assert screen.keys[:2] == ["space", "enter"]
     assert [k for k in screen.keys if k == "f"] == ["f", "f"]
     assert game.launches == 1 and not game.is_running
@@ -63,9 +63,21 @@ def test_keeps_game_team_when_balanced():
     assert "switch_team" not in screen.clicks
 
 
-def test_switches_to_the_short_team_once():
-    # The game put us on NVA (the fake shows its badge) while NVA is 6 ahead.
+def test_select_force_picks_the_smaller_team():
     config, game, screen, clock = make()
+    runner.seed(config, game, screen, statuses(11, 80), clock)  # allies 6, axis 5
+    assert "force_nva" in screen.clicks and "force_us" not in screen.clicks
+    assert "switch_team" not in screen.clicks
+
+
+def test_switches_to_the_short_team_once():
+    # Rejoining skips Select Force; the game put us on NVA (the fake shows
+    # its badge) while NVA is 6 ahead.
+    config, game, screen, clock = make()
+    path = dict(HAPPY_PATH)
+    path["browser_join"] = ({"server_row", "browser_join", "browser_refresh"},
+                            {"switch_team", "faction_nva", "squad_join", "infantry_create"})
+    screen.transitions = path
 
     def fetch(_url):
         return ServerStatus("S", 20 if not screen.clicks.count("squad_join") else 80, 7, 13, 0)
@@ -261,3 +273,18 @@ def test_nudges_to_avoid_idle_kick():
     config, game, screen, clock = make()
     runner.seed(config, game, screen, statuses(*([10] * 8), 80), clock)
     assert "a" in screen.keys and "d" in screen.keys
+
+
+def test_unknown_screen_is_logged_with_a_screenshot(tmp_path, monkeypatch, caplog):
+    import seeder.config
+
+    monkeypatch.setattr(seeder.config, "app_dir", lambda: tmp_path)
+    screen = FakeScreen(HAPPY_PATH)
+    saved = []
+    screen.save_screenshot = saved.append
+    screen.visible = {"menu_enlist"}
+    screen.transitions = {"menu_enlist": ({"menu_enlist"}, set())}  # leads to a screen we don't know
+    nav = flow.Navigator(screen, Config(), FakeClock(), lambda: None)
+    assert not nav.get_in(timeout=200)
+    assert len(saved) == 1 and saved[0].parent == tmp_path / "debug"
+    assert "unrecognised screen" in caplog.text

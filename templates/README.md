@@ -15,6 +15,8 @@ screenshots).
 | `server_row.png` | The Syndicate server's name in the list |
 | `browser_join.png` | JOIN buttons; the one on the server's row is clicked |
 | `browser_refresh.png` | Server browser with our server missing; R refreshes every 20 s |
+| `select_force.png` | Select Force screen (fresh join); the smaller team's card is clicked |
+| `force_us.png` / `force_nva.png` | The US and NVA cards on Select Force |
 | `switch_team.png` | Units screen (the game has already picked a team) |
 | `faction_nva.png` | NVA badge on Units/Deployment, to tell which team we're on |
 | `squad_join.png` | Join arrow on an infantry squad |

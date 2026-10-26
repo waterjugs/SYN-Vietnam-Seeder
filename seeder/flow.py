@@ -3,9 +3,10 @@
 What joining looks like in this version:
 
   splash ("press any button") -> main menu (ENLIST) -> server browser
-  (search, JOIN on the server's row) -> Units (the game picks your team;
-  SWITCH TEAM is available) -> Edit Roles (F confirms) -> Deployment
-  (F deploys at the selected HQ) -> in game.
+  (search, JOIN on the server's row) -> Select Force (US or NVA; skipped
+  when rejoining a server you were just on) -> Units (SWITCH TEAM is
+  available) -> Edit Roles (F confirms) -> Deployment (F deploys at the
+  selected HQ) -> in game.
 
 Admin messages pop up with a "[Y] YES" button, and Esc opens a game menu;
 both are overlays that can show up in game too. Each tick looks at the
@@ -29,6 +30,7 @@ SCREENS = [
     *OVERLAYS,
     "deploy_button",
     "roles_confirm",
+    "select_force",
     "switch_team",
     "server_row",
     "browser_search",
@@ -40,6 +42,8 @@ SCREENS = [
 INFANTRY_COLUMN = (0.29, 0.10, 0.53, 0.95)
 INFANTRY_CREATE = (0.29, 0.10, 0.53, 0.22)
 FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
+# The two cards on Select Force.
+FORCE_CARDS = {"allies": ("force_us", (0.05, 0.30, 0.50, 0.55)), "axis": ("force_nva", (0.50, 0.30, 0.95, 0.55))}
 
 REFRESH_EVERY = 20  # seconds between server list refreshes while our server is missing
 
@@ -74,17 +78,20 @@ class Navigator:
 
     ``side`` is called whenever a team decision comes up and returns the
     team that needs players ("allies" or "axis"), or None to keep the
-    game's pick. ``focus`` brings the game to the front and says whether it
+    game's pick. ``pick`` returns the team to choose on Select Force (the
+    smaller one). ``focus`` brings the game to the front and says whether it
     is; no input is sent while it isn't. ``alive`` says whether the game is
     still running.
     """
 
     def __init__(self, screen, config, clock: Clock, side: Callable[[], str | None],
-                 focus: Callable[[], bool] = lambda: True, alive: Callable[[], bool] = lambda: True):
+                 focus: Callable[[], bool] = lambda: True, alive: Callable[[], bool] = lambda: True,
+                 pick: Callable[[], str] = lambda: "allies"):
         self.screen = screen
         self.config = config
         self.clock = clock
         self.side = side
+        self.pick = pick
         self.focus = focus
         self.alive = alive
         self.switched_team = False
@@ -102,6 +109,8 @@ class Navigator:
         seen: set[str] = set()
         deployed = False
         quiet_ticks = 0
+        unknown_ticks = 0
+        last, repeats = None, 0
         while self.clock.monotonic() < deadline:
             if not self.alive():
                 log.warning("The game closed while getting into the server")
@@ -119,9 +128,17 @@ class Navigator:
                         return True
                 elif fresh_launch and not seen - set(OVERLAYS):
                     self.screen.press("space")  # splash / "press any button"
+                else:
+                    unknown_ticks += 1
+                    if unknown_ticks == 30:
+                        self._snapshot("unrecognised screen for a minute")
                 self.clock.sleep(2)
                 continue
-            quiet_ticks = 0
+            quiet_ticks = unknown_ticks = 0
+            repeats = repeats + 1 if name == last else 0
+            last = name
+            if repeats == 15:
+                self._snapshot(f"still on {name} after 15 tries")
             if name not in seen:
                 log.info("On screen: %s", name)
             seen.add(name)
@@ -133,6 +150,26 @@ class Navigator:
             self.clock.sleep(2)
         log.warning("Couldn't get into the server within %ss", round(timeout))
         return False
+
+    def _snapshot(self, why: str) -> None:
+        """Saves what's on screen so an unexpected menu can be added later."""
+        save = getattr(self.screen, "save_screenshot", None)
+        if save is None:
+            log.warning("Stuck: %s", why)
+            return
+        from datetime import datetime
+
+        from .config import app_dir
+
+        folder = app_dir() / "debug"
+        folder.mkdir(exist_ok=True)
+        path = folder / f"{datetime.now():%Y%m%d-%H%M%S}.png"
+        try:
+            save(path)
+        except Exception as exc:  # a failed debug screenshot must not end the run
+            log.warning("Stuck: %s (screenshot failed: %s)", why, exc)
+            return
+        log.warning("Stuck: %s. Saved %s", why, path)
 
     def handle(self, name: str) -> None:
         getattr(self, "_on_" + name)()
@@ -150,6 +187,15 @@ class Navigator:
 
     def _on_roles_confirm(self) -> None:
         self.screen.press("f")
+
+    def _on_select_force(self) -> None:
+        team = self.pick()
+        name, region = FORCE_CARDS[team]
+        card = self.screen.find(name, region)
+        if card:
+            log.info("Picking %s", "US" if team == "allies" else "NVA")
+            self.switched_team = True  # chosen deliberately; don't switch again on Units
+            self.screen.click(card)
 
     def _on_switch_team(self) -> None:
         wanted = self.side()
