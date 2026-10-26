@@ -93,7 +93,74 @@ def test_creates_a_squad_when_none_open():
     path["browser_join"] = ({"server_row", "browser_join", "browser_refresh"}, {"switch_team", "infantry_create"})
     screen.transitions = path
     runner.seed(config, game, screen, statuses(10, 80), clock)
-    assert "infantry_create" in screen.clicks
+    assert screen.clicks[-2:] == ["infantry_create", "create_unit_button"]
+    assert "roles_confirm" not in screen.visible and [k for k in screen.keys if k == "f"] == ["f", "f"]
+
+
+def test_select_force_tries_the_other_card_when_one_is_locked():
+    config, game, screen, clock = make()
+    path = dict(HAPPY_PATH)
+    path["force_us"] = (set(), set())  # US is locked: clicking it does nothing
+    screen.transitions = path
+    assert runner.seed(config, game, screen, statuses(10, 80), clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("force_us") == flow.FORCE_TRIES
+    assert screen.clicks.count("force_nva") == 1
+
+
+def test_select_force_uses_the_other_card_when_one_is_missing():
+    config, game, screen, clock = make()
+    path = dict(HAPPY_PATH)
+    path["browser_join"] = ({"server_row", "browser_join", "browser_refresh"}, {"select_force", "force_nva"})
+    screen.transitions = path
+    assert runner.seed(config, game, screen, statuses(10, 80), clock) is runner.Outcome.SEEDED
+    assert "force_nva" in screen.clicks and "force_us" not in screen.clicks
+
+
+def test_select_force_uses_current_team_counts():
+    # Allies were short when the run started, but by the time Select Force
+    # shows (after a slow launch) NVA is.
+    config, game, screen, clock = make()
+    real_launch = game.launch
+
+    def slow_launch(timeout=None):
+        clock.sleep(60)
+        return real_launch(timeout)
+
+    game.launch = slow_launch
+    fetch = statuses(10, 10, 80, allied_heavy=False)  # 5 v 5 first...
+    counts = iter([ServerStatus("S", 10, 3, 7, 0), ServerStatus("S", 11, 7, 4, 0)])
+
+    def changing(url):
+        return next(counts, None) or fetch(url)
+
+    runner.seed(config, game, screen, changing, clock)
+    assert "force_nva" in screen.clicks and "force_us" not in screen.clicks
+
+
+def test_rejoin_can_switch_team_again():
+    # Picked US on Select Force; later kicked to the menu and rejoined onto
+    # NVA while NVA is well ahead: switching is allowed again.
+    config, game, screen, clock = make()
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            screen.visible = {"menu_enlist"}
+            screen.transitions = dict(HAPPY_PATH, browser_join=(
+                {"server_row", "browser_join", "browser_refresh"},
+                {"switch_team", "faction_nva", "squad_join", "infantry_create"}))
+        return ServerStatus("S", 80 if calls["n"] >= 8 else 20, 7, 13, 0)
+
+    assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
+    assert "force_us" in screen.clicks and screen.clicks.count("switch_team") == 1
+
+
+def test_short_test_runs_still_launch():
+    config, game, screen, clock = make()
+    config.max_minutes = 5
+    runner.seed(config, game, screen, statuses(10), clock)
+    assert game.launches == 1
 
 
 def test_restarts_after_crash():

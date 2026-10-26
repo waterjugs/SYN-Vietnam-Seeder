@@ -25,6 +25,8 @@ BOXES = {
     "squad_join": ("units", 1268, 286, 1318, 336),
     "infantry_create": ("units", 1012, 216, 1092, 252),
     "roles_confirm": ("roles", 281, 1338, 459, 1372),
+    # The "CONFIRM ROLE" hint sits on the 3D scene, which changes; the title bar doesn't.
+    "roles_confirm.title": ("roles", 71, 27, 357, 78),
     "admin_yes": ("roles_msg", 2203, 598, 2302, 629),
     "deploy_button": ("deploy", 2110, 1301, 2317, 1343),
     "game_menu_leave": ("gamemenu", 123, 1150, 360, 1181),
@@ -32,6 +34,9 @@ BOXES = {
     "select_force": ("select_force", 1037, 281, 1520, 340),
     "force_us": ("select_force", 421, 601, 789, 641),
     "force_nva": ("select_force", 2021, 601, 2128, 641),
+    # create_unit.jpg too (the popup after the + on Units)
+    "create_unit": ("create_unit", 598, 408, 893, 472),
+    "create_unit_button": ("create_unit", 1770, 1025, 2150, 1109),
 }
 
 

@@ -46,14 +46,23 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
     if not game.unlocked():
         return Outcome.LOCKED
 
-    latest = {"status": status}
+    latest = {"status": status, "at": clock.monotonic()}
+
+    def refresh_status(max_age: float = 0):
+        if clock.monotonic() - latest["at"] >= max_age:
+            latest["status"] = fetch(config.crcon_url) or latest["status"]
+            latest["at"] = clock.monotonic()
 
     def needy_side():
         s = latest["status"]
         return s.weaker_side() if abs(s.allied - s.axis) >= 2 else None
 
-    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running,
-                         pick=lambda: latest["status"].weaker_side())
+    def pick():
+        # Select Force can come minutes after the last check; use current numbers.
+        refresh_status(max_age=30)
+        return latest["status"].weaker_side()
+
+    nav = flow.Navigator(screen, config, clock, needy_side, focus=game.focus, alive=game.running, pick=pick)
     deadline = clock.monotonic() + config.max_minutes * 60
     attempts = 0
     in_server = False
@@ -63,12 +72,16 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
         while True:
             remaining = deadline - clock.monotonic()
             if not in_server:
-                if remaining < config.launch_timeout + config.load_timeout:
+                # The first try always runs (its waits are cut to fit); a retry
+                # needs time for a full launch and join.
+                if remaining <= 0 or (attempts and remaining < config.launch_timeout + config.load_timeout):
                     outcome = Outcome.TIMED_OUT
                     return outcome
                 if attempts > config.max_restarts:
                     outcome = Outcome.GAVE_UP
                     return outcome
+                if attempts:
+                    refresh_status()
                 attempts += 1
                 in_server = _get_in(config, game, nav, remaining)
                 if not in_server:
@@ -86,7 +99,7 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
                 in_server = False
                 continue
 
-            latest["status"] = fetch(config.crcon_url) or latest["status"]
+            refresh_status()
             count = latest["status"].player_count
             log.info("Players: %s/%s", count, config.seeded_threshold)
             if count >= config.seeded_threshold:

@@ -5,8 +5,9 @@ What joining looks like in this version:
   splash ("press any button") -> main menu (ENLIST) -> server browser
   (search, JOIN on the server's row) -> Select Force (US or NVA; skipped
   when rejoining a server you were just on) -> Units (SWITCH TEAM is
-  available) -> Edit Roles (F confirms) -> Deployment (F deploys at the
-  selected HQ) -> in game.
+  available; join a squad, or + opens a Create a Unit popup whose CREATE
+  UNIT button makes you its squad leader) -> Edit Roles (F confirms) ->
+  Deployment (F deploys at the selected HQ) -> in game.
 
 Admin messages pop up with a "[Y] YES" button, and Esc opens a game menu;
 both are overlays that can show up in game too. Each tick looks at the
@@ -31,6 +32,7 @@ SCREENS = [
     "deploy_button",
     "roles_confirm",
     "select_force",
+    "create_unit",
     "switch_team",
     "server_row",
     "browser_search",
@@ -44,8 +46,14 @@ INFANTRY_CREATE = (0.29, 0.10, 0.53, 0.22)
 FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 # The two cards on Select Force.
 FORCE_CARDS = {"allies": ("force_us", (0.05, 0.30, 0.50, 0.55)), "axis": ("force_nva", (0.50, 0.30, 0.95, 0.55))}
+FORCE_TRIES = 3  # clicks on one card before trying the other (it may be locked)
+# The bottom right of the Create a Unit popup, where its CREATE UNIT button is.
+CREATE_UNIT_BUTTON = (0.55, 0.60, 0.95, 0.90)
 
 REFRESH_EVERY = 20  # seconds between server list refreshes while our server is missing
+STUCK_TICKS = 90  # ~3 minutes on a screen we don't know (a map load takes 1-2) before a screenshot
+STUCK_REPEATS = 15  # the same screen this many ticks in a row also gets a screenshot
+KEEP_SCREENSHOTS = 20  # newest debug screenshots kept
 
 
 class Stopped(Exception):
@@ -95,6 +103,7 @@ class Navigator:
         self.focus = focus
         self.alive = alive
         self.switched_team = False
+        self._force_tries = 0
         self._tried: list[tuple[int, int]] = []
         self._last_refresh = float("-inf")
 
@@ -106,6 +115,8 @@ class Navigator:
         is the splash waiting for a key rather than gameplay.
         """
         deadline = self.clock.monotonic() + timeout
+        # One team switch per trip in; a later rejoin may need another.
+        self.switched_team = False
         seen: set[str] = set()
         deployed = False
         quiet_ticks = 0
@@ -126,19 +137,17 @@ class Navigator:
                     if quiet_ticks >= 3:
                         log.info("In game")
                         return True
-                elif fresh_launch and not seen - set(OVERLAYS):
-                    self.screen.press("space")  # splash / "press any button"
                 else:
+                    if fresh_launch and not seen - set(OVERLAYS):
+                        self.screen.press("space")  # splash / "press any button"
                     unknown_ticks += 1
-                    if unknown_ticks == 30:
-                        self._snapshot("unrecognised screen for a minute")
+                    if unknown_ticks == STUCK_TICKS:
+                        self._snapshot("unrecognised screen for 3 minutes")
                 self.clock.sleep(2)
                 continue
             quiet_ticks = unknown_ticks = 0
             repeats = repeats + 1 if name == last else 0
             last = name
-            if repeats == 15:
-                self._snapshot(f"still on {name} after 15 tries")
             if name not in seen:
                 log.info("On screen: %s", name)
             seen.add(name)
@@ -146,7 +155,12 @@ class Navigator:
                 deployed = name == "deploy_button"
             if name != "switch_team":
                 self._tried.clear()
+            if name != "select_force":
+                self._force_tries = 0
             self.handle(name)
+            # After acting, so the screenshot can't replace the frame the handler used.
+            if repeats == STUCK_REPEATS and name != "browser_refresh":  # waiting on the list is normal
+                self._snapshot(f"still on {name} after {STUCK_REPEATS} tries")
             self.clock.sleep(2)
         log.warning("Couldn't get into the server within %ss", round(timeout))
         return False
@@ -161,10 +175,13 @@ class Navigator:
 
         from .config import app_dir
 
-        folder = app_dir() / "debug"
-        folder.mkdir(exist_ok=True)
-        path = folder / f"{datetime.now():%Y%m%d-%H%M%S}.png"
         try:
+            folder = app_dir() / "debug"
+            folder.mkdir(exist_ok=True)
+            # Names sort oldest first; keep the folder from growing forever.
+            for old in sorted(folder.glob("*.png"))[: -(KEEP_SCREENSHOTS - 1)]:
+                old.unlink()
+            path = folder / f"{datetime.now():%Y%m%d-%H%M%S}.png"
             save(path)
         except Exception as exc:  # a failed debug screenshot must not end the run
             log.warning("Stuck: %s (screenshot failed: %s)", why, exc)
@@ -190,12 +207,27 @@ class Navigator:
 
     def _on_select_force(self) -> None:
         team = self.pick()
-        name, region = FORCE_CARDS[team]
-        card = self.screen.find(name, region)
-        if card:
+        other = "axis" if team == "allies" else "allies"
+        if self._force_tries >= FORCE_TRIES:
+            # Still here after a few clicks: that card may be locked.
+            team, other = other, team
+        card = self.screen.find(*FORCE_CARDS[team])
+        if card is None:
+            team, card = other, self.screen.find(*FORCE_CARDS[other])
+        if card is None:
+            log.warning("Couldn't find the US or NVA card on Select Force")
+            return
+        self._force_tries += 1
+        if self._force_tries in (1, FORCE_TRIES + 1):
             log.info("Picking %s", "US" if team == "allies" else "NVA")
-            self.switched_team = True  # chosen deliberately; don't switch again on Units
-            self.screen.click(card)
+        self.switched_team = True  # chosen deliberately; don't switch again on Units
+        self.screen.click(card)
+
+    def _on_create_unit(self) -> None:
+        button = self.screen.find("create_unit_button", CREATE_UNIT_BUTTON)
+        if button:
+            log.info("Creating the unit")
+            self.screen.click(button)
 
     def _on_switch_team(self) -> None:
         wanted = self.side()

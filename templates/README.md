@@ -21,7 +21,9 @@ screenshots).
 | `faction_nva.png` | NVA badge on Units/Deployment, to tell which team we're on |
 | `squad_join.png` | Join arrow on an infantry squad |
 | `infantry_create.png` | The + that creates an infantry squad |
-| `roles_confirm.png` | Edit Roles screen; F confirms |
+| `create_unit.png` | "Create a Unit" popup that the + opens |
+| `create_unit_button.png` | Its CREATE UNIT button; clicked |
+| `roles_confirm.png`, `roles_confirm.title.png` | Edit Roles screen (by the F CONFIRM ROLE hint or the title bar); F confirms |
 | `admin_yes.png` | Admin message popup; clicked to close it |
 | `deploy_button.png` | Deployment screen; F deploys |
 | `game_menu_leave.png` | Esc menu open by accident; Esc closes it |

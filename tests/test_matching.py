@@ -22,9 +22,12 @@ EXPECTED = {
     "search_empty": "browser_refresh",  # edited copy of "search" with the row removed
     "select_force": "select_force",  # assembled from native-res zooms of the live screen
     "units": "switch_team",
+    "create_unit": "create_unit",  # popup after +; assembled from native-res zooms
     "roles_msg": "admin_yes",
     "roles": "roles_confirm",
+    "roles_live": "roles_confirm",  # 2026-10-26 live run, half-res capture: other background behind "CONFIRM ROLE"
     "deploy": "deploy_button",
+    "deploy_counting": None,  # after F: CANCEL DEPLOY counting down; another F would cancel it
     "ingame": None,
     "gamemenu": "game_menu_leave",
 }
@@ -72,6 +75,16 @@ def test_select_force_cards(res):
     nva = screen.find(*flow.FORCE_CARDS["axis"])
     assert us and us[0] < w / 2
     assert nva and nva[0] > w / 2
+
+
+@pytest.mark.parametrize("res", RESOLUTIONS)
+def test_create_unit_button(res):
+    w, h = RESOLUTIONS[res]
+    screen = ImageScreen(load("create_unit", (w, h)))
+    screen.refresh()
+    button = screen.find("create_unit_button", flow.CREATE_UNIT_BUTTON)
+    # CREATE UNIT sits at about (0.765, 0.741) of the screen
+    assert button and abs(button[0] / w - 0.765) < 0.02 and abs(button[1] / h - 0.741) < 0.02
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)

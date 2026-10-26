@@ -38,7 +38,7 @@ Region = tuple[float, float, float, float]
 REQUIRED_TEMPLATES = {
     "admin_yes", "game_menu_leave", "deploy_button", "roles_confirm", "switch_team", "server_row",
     "browser_search", "browser_refresh", "menu_enlist", "browser_join", "faction_nva", "squad_join",
-    "infantry_create", "select_force", "force_us", "force_nva",
+    "infantry_create", "select_force", "force_us", "force_nva", "create_unit", "create_unit_button",
 }
 
 
@@ -207,7 +207,9 @@ class Screen(Vision):
 
     # Acting
 
-    def click(self, pos: tuple[int, int]) -> None:
+    def click(self, pos: tuple[int, int] | None) -> None:
+        if pos is None:  # the button went away since the screen was read
+            return
         self._win.click_at(*pos)
         time.sleep(0.1)
         # Park the cursor at the edge so hover highlights don't change the next match.
@@ -225,7 +227,7 @@ class Screen(Vision):
         self._win.key_up(key)
 
     def save_screenshot(self, path: Path) -> None:
-        self.refresh()
+        # Grabs the area of the last refresh without replacing the frame being matched.
         shot = cv2.cvtColor(np.asarray(self._mss.grab(self._area)), cv2.COLOR_BGRA2BGR)
         ok, data = cv2.imencode(".png", shot)
         if ok:
