@@ -26,6 +26,7 @@ EXPECTED = {
     "roles_msg": "admin_yes",
     "roles": "roles_confirm",
     "roles_live": "roles_confirm",  # 2026-10-26 live run, half-res capture: other background behind "CONFIRM ROLE"
+    "select_role": "roles_confirm",  # 2026-10-26 live run: SELECT A ROLE after joining someone else's squad
     "deploy": "deploy_button",
     "deploy_counting": None,  # after F: CANCEL DEPLOY counting down; another F would cancel it
     "ingame": None,

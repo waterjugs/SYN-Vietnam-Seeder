@@ -23,7 +23,7 @@ screenshots).
 | `infantry_create.png` | The + that creates an infantry squad |
 | `create_unit.png` | "Create a Unit" popup that the + opens |
 | `create_unit_button.png` | Its CREATE UNIT button; clicked |
-| `roles_confirm.png`, `roles_confirm.title.png` | Edit Roles screen (by the F CONFIRM ROLE hint or the title bar); F confirms |
+| `roles_confirm.png`, `roles_confirm.title.png`, `roles_confirm.select.png` | Edit Roles (own squad) or Select a Role (someone else's squad), by the F CONFIRM ROLE hint or either title bar; F confirms |
 | `admin_yes.png` | Admin message popup; clicked to close it |
 | `deploy_button.png` | Deployment screen; F deploys |
 | `game_menu_leave.png` | Esc menu open by accident; Esc closes it |

@@ -27,6 +27,8 @@ BOXES = {
     "roles_confirm": ("roles", 281, 1338, 459, 1372),
     # The "CONFIRM ROLE" hint sits on the 3D scene, which changes; the title bar doesn't.
     "roles_confirm.title": ("roles", 71, 27, 357, 78),
+    # Joining someone else's squad shows SELECT A ROLE instead of EDIT ROLES.
+    "roles_confirm.select": ("select_role", 71, 27, 445, 78),
     "admin_yes": ("roles_msg", 2203, 598, 2302, 629),
     "deploy_button": ("deploy", 2110, 1301, 2317, 1343),
     "game_menu_leave": ("gamemenu", 123, 1150, 360, 1181),
