@@ -46,7 +46,7 @@ INFANTRY_CREATE = (0.29, 0.10, 0.53, 0.22)
 FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 # The two cards on Select Force.
 FORCE_CARDS = {"allies": ("force_us", (0.05, 0.30, 0.50, 0.55)), "axis": ("force_nva", (0.50, 0.30, 0.95, 0.55))}
-FORCE_TRIES = 3  # clicks on one card before trying the other (it may be locked)
+FORCE_TRIES = 5  # clicks (~10 s) on one card before trying the other, in case it's locked
 # The bottom right of the Create a Unit popup, where its CREATE UNIT button is.
 CREATE_UNIT_BUTTON = (0.55, 0.60, 0.95, 0.90)
 
@@ -104,6 +104,7 @@ class Navigator:
         self.alive = alive
         self.switched_team = False
         self._force_tries = 0
+        self._force_team: str | None = None
         self._tried: list[tuple[int, int]] = []
         self._last_refresh = float("-inf")
 
@@ -155,8 +156,8 @@ class Navigator:
                 deployed = name == "deploy_button"
             if name != "switch_team":
                 self._tried.clear()
-            if name != "select_force":
-                self._force_tries = 0
+            if name not in OVERLAYS and name != "select_force":
+                self._force_tries, self._force_team = 0, None
             self.handle(name)
             # After acting, so the screenshot can't replace the frame the handler used.
             if repeats == STUCK_REPEATS and name != "browser_refresh":  # waiting on the list is normal
@@ -171,6 +172,7 @@ class Navigator:
         if save is None:
             log.warning("Stuck: %s", why)
             return
+        import contextlib
         from datetime import datetime
 
         from .config import app_dir
@@ -178,15 +180,16 @@ class Navigator:
         try:
             folder = app_dir() / "debug"
             folder.mkdir(exist_ok=True)
-            # Names sort oldest first; keep the folder from growing forever.
-            for old in sorted(folder.glob("*.png"))[: -(KEEP_SCREENSHOTS - 1)]:
-                old.unlink()
             path = folder / f"{datetime.now():%Y%m%d-%H%M%S}.png"
             save(path)
         except Exception as exc:  # a failed debug screenshot must not end the run
             log.warning("Stuck: %s (screenshot failed: %s)", why, exc)
             return
         log.warning("Stuck: %s. Saved %s", why, path)
+        # Names sort oldest first; keep the folder from growing forever.
+        for old in sorted(folder.glob("*.png"))[:-KEEP_SCREENSHOTS]:
+            with contextlib.suppress(OSError):  # e.g. open in a viewer
+                old.unlink()
 
     def handle(self, name: str) -> None:
         getattr(self, "_on_" + name)()
@@ -206,10 +209,13 @@ class Navigator:
         self.screen.press("f")
 
     def _on_select_force(self) -> None:
-        team = self.pick()
+        if self._force_team is None:
+            self._force_team = self.pick()  # once per visit, so the choice can't flip mid-way
+        team = self._force_team
         other = "axis" if team == "allies" else "allies"
-        if self._force_tries >= FORCE_TRIES:
-            # Still here after a few clicks: that card may be locked.
+        if (self._force_tries // FORCE_TRIES) % 2:
+            # Still here after several clicks: that card may be locked. Take
+            # turns between the two so a slow screen still ends up on ours.
             team, other = other, team
         card = self.screen.find(*FORCE_CARDS[team])
         if card is None:
@@ -217,9 +223,9 @@ class Navigator:
         if card is None:
             log.warning("Couldn't find the US or NVA card on Select Force")
             return
-        self._force_tries += 1
-        if self._force_tries in (1, FORCE_TRIES + 1):
+        if self._force_tries % FORCE_TRIES == 0:
             log.info("Picking %s", "US" if team == "allies" else "NVA")
+        self._force_tries += 1
         self.switched_team = True  # chosen deliberately; don't switch again on Units
         self.screen.click(card)
 

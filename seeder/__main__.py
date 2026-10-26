@@ -69,6 +69,7 @@ def run_record(minutes: float, every: float) -> int:
     n = 0
     while time.monotonic() < end:
         n += 1
+        screen.refresh()  # follows the monitor and warns about black captures
         screen.save_screenshot(out / f"{n:04d}.png")
         time.sleep(every)
     log.info("Saved %s screenshots to %s", n, out)

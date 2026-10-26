@@ -83,7 +83,7 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
                 if attempts:
                     refresh_status()
                 attempts += 1
-                in_server = _get_in(config, game, nav, remaining)
+                in_server = _get_in(config, game, nav, clock, deadline)
                 if not in_server:
                     game.close()
                     clock.sleep(15)
@@ -114,18 +114,20 @@ def seed(config, game, screen, fetch, clock: Clock | None = None) -> Outcome:
             elif name is not None:
                 # Kicked to the menu, new map, or died: walk back in.
                 log.info("Not in game any more; getting back in")
-                in_server = nav.get_in(min(config.load_timeout, max(remaining, 1)))
+                in_server = nav.get_in(min(config.load_timeout, max(deadline - clock.monotonic(), 1)))
             elif clock.monotonic() - last_nudge >= config.anti_afk_seconds:
                 flow.nudge(screen)
                 last_nudge = clock.monotonic()
     finally:
         # Steam can start the game minutes late (e.g. after an update), so
-        # after a failed launch keep watching for it a little longer.
-        game.close(linger=90 if outcome is Outcome.GAVE_UP else 0)
+        # if it isn't up at the end, keep watching for it a little longer.
+        late_start = outcome is Outcome.GAVE_UP or (outcome is Outcome.TIMED_OUT and attempts and not game.running())
+        game.close(linger=90 if late_start else 0)
 
 
-def _get_in(config, game, nav, remaining: float) -> bool:
+def _get_in(config, game, nav, clock: Clock, deadline: float) -> bool:
     fresh = not game.running()
-    if fresh and not game.launch(min(config.launch_timeout, remaining)):
+    if fresh and not game.launch(min(config.launch_timeout, max(deadline - clock.monotonic(), 1))):
         return False
-    return nav.get_in(min(config.launch_timeout + config.load_timeout, remaining), fresh_launch=fresh)
+    left = max(deadline - clock.monotonic(), 1)  # what the launch didn't use
+    return nav.get_in(min(config.launch_timeout + config.load_timeout, left), fresh_launch=fresh)

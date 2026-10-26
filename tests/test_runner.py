@@ -107,6 +107,43 @@ def test_select_force_tries_the_other_card_when_one_is_locked():
     assert screen.clicks.count("force_nva") == 1
 
 
+def _slow_card(screen, card, accept_after):
+    """Clicks on ``card`` do nothing until the ``accept_after``-th one."""
+    click = screen.click
+    count = {"n": 0}
+
+    def slow_click(pos):
+        name = next(n for n in screen.visible if hash(n) == pos[0])
+        if name == card:
+            count["n"] += 1
+            if count["n"] < accept_after:
+                screen.clicks.append(name)
+                return
+        click(pos)
+
+    screen.click = slow_click
+
+
+def test_select_force_waits_for_a_slow_screen_before_trying_the_other_card():
+    # US only takes on the 4th click (~8 s) because the screen is still loading.
+    config, game, screen, clock = make()
+    _slow_card(screen, "force_us", accept_after=4)
+    runner.seed(config, game, screen, statuses(10, 80), clock)
+    assert screen.clicks.count("force_us") == 4 and "force_nva" not in screen.clicks
+
+
+def test_select_force_takes_turns_when_neither_card_takes_at_first():
+    # US is slow to accept and NVA is locked: it goes back to US.
+    config, game, screen, clock = make()
+    path = dict(HAPPY_PATH)
+    path["force_nva"] = (set(), set())
+    screen.transitions = path
+    _slow_card(screen, "force_us", accept_after=flow.FORCE_TRIES + 1)
+    assert runner.seed(config, game, screen, statuses(10, 80), clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("force_us") == flow.FORCE_TRIES + 1
+    assert screen.clicks.count("force_nva") == flow.FORCE_TRIES
+
+
 def test_select_force_uses_the_other_card_when_one_is_missing():
     config, game, screen, clock = make()
     path = dict(HAPPY_PATH)
@@ -161,6 +198,31 @@ def test_short_test_runs_still_launch():
     config.max_minutes = 5
     runner.seed(config, game, screen, statuses(10), clock)
     assert game.launches == 1
+
+
+def test_short_runs_keep_to_their_time_limit():
+    # A slow launch, then a menu the bot never recognises.
+    config, game, screen, clock = make()
+    config.max_minutes = 5
+    real_launch = game.launch
+
+    def slow_launch(timeout=None):
+        clock.sleep(250)
+        real_launch(timeout)
+        screen.visible = {"something_new"}
+        return True
+
+    game.launch = slow_launch
+    assert runner.seed(config, game, screen, statuses(10), clock) is runner.Outcome.TIMED_OUT
+    assert clock.now <= 5 * 60 + 20
+
+
+def test_failed_late_launch_is_watched_for():
+    # Steam is slow (e.g. updating); the run ends before the game appears.
+    config, game, screen, clock = make(launch_ok=False)
+    config.max_minutes = 5
+    assert runner.seed(config, game, screen, statuses(10), clock) is runner.Outcome.TIMED_OUT
+    assert game.lingered == 90
 
 
 def test_restarts_after_crash():
@@ -355,3 +417,31 @@ def test_unknown_screen_is_logged_with_a_screenshot(tmp_path, monkeypatch, caplo
     assert not nav.get_in(timeout=200)
     assert len(saved) == 1 and saved[0].parent == tmp_path / "debug"
     assert "unrecognised screen" in caplog.text
+
+
+def test_debug_screenshots_are_capped_and_a_stuck_file_does_not_block_new_ones(tmp_path, monkeypatch):
+    import pathlib
+
+    import seeder.config
+
+    monkeypatch.setattr(seeder.config, "app_dir", lambda: tmp_path)
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    for i in range(25):
+        (debug / f"20260101-0000{i:02d}.png").write_bytes(b"x")
+    locked = debug / "20260101-000000.png"
+    real_unlink = pathlib.Path.unlink
+
+    def unlink(self, *args, **kwargs):
+        if self == locked:
+            raise PermissionError(32, "in use")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", unlink)
+    screen = FakeScreen(HAPPY_PATH)
+    screen.save_screenshot = lambda path: path.write_bytes(b"new")
+    nav = flow.Navigator(screen, Config(), FakeClock(), lambda: None)
+    nav._snapshot("test")
+    files = sorted(p.name for p in debug.glob("*.png"))
+    assert locked.name in files and len(files) == flow.KEEP_SCREENSHOTS + 1
+    assert any(p.read_bytes() == b"new" for p in debug.glob("*.png"))
