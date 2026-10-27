@@ -36,7 +36,6 @@ PADDY = "#86C17A"
 SKY = [(0.00, "#0C1823"), (0.38, "#1F2638"), (0.62, "#4B3546"), (0.80, "#9E5141"), (0.93, "#E28E52"), (1.0, "#F6B666")]
 SUN_EDGE = "#F7B862"
 SUN_CORE = "#FFE6B0"
-HELI = "#0E1612"
 
 
 def rgb(h: str) -> tuple[int, int, int]:
@@ -69,65 +68,6 @@ def radial_glow(width: int, height: int, cx: float, cy: float, radius: float, co
     layer[..., :3] = rgb(colour)
     layer[..., 3] = a.clip(0, 255).astype(np.uint8)
     return Image.fromarray(layer, "RGBA")
-
-
-# --------------------------------------------------------------------------- the Huey
-# Side view, nose to the left, in units: 100 units is roughly nose to fin.
-BODY = [(0.5, 14), (1.5, 10.2), (4, 7.6), (8, 6.2), (12, 5.6), (22, 5.4), (24, 2.2), (28, 1.0), (46, 1.0),
-        (50, 3.0), (52.5, 5.8), (56, 7.0), (91, 8.4), (92, 11.4), (56, 13.6), (52, 16.4), (49, 21),
-        (6, 21), (3, 19.6), (1, 17.2)]
-FIN = [(85.5, 9.2), (92.5, -5.5), (97, -5.5), (97, 3.5), (94.5, 12.2), (88, 12.2)]
-STAB = [(71, 10.6), (80, 10.0), (80, 11.8), (71, 12.8)]
-MAST = [(32.3, -2.6), (34.7, -2.6), (34.7, 1.6), (32.3, 1.6)]
-# (x0, y0, x1, y1, thickness) strokes
-ROTOR = (-12.0, -2.9, 78.0, -3.9)
-TAIL_ROTOR = (89.6, -7.6, 100.4, 5.4)
-STRUTS = [(15, 20.5, 13.5, 27.2), (41, 20.5, 42.5, 27.2)]
-SKID = [(3.5, 27.2), (50, 27.2)]
-SKID_TIP = [(3.5, 27.2), (1.2, 26.2), (0.0, 24.6)]
-
-
-def _transform(points, ox, oy, scale, angle_deg, pivot=(50.0, 12.0)):
-    a = math.radians(angle_deg)
-    ca, sa = math.cos(a), math.sin(a)
-    out = []
-    for x, y in points:
-        x -= pivot[0]
-        y -= pivot[1]
-        out.append((ox + (x * ca - y * sa) * scale, oy + (x * sa + y * ca) * scale))
-    return out
-
-
-def _stroke(draw, p0, p1, width, fill):
-    draw.line([p0, p1], fill=fill, width=max(1, int(round(width))))
-    r = width / 2
-    for (x, y) in (p0, p1):
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=fill)
-
-
-def draw_huey(draw: ImageDraw.ImageDraw, ox: float, oy: float, scale: float, fill, angle: float = -5.0,
-              bold: float = 1.0, detail: int = 2) -> None:
-    """Draw the Huey centred near (ox, oy). scale = px per unit; bold thickens the strokes for small
-    sizes; detail 2 adds the tail stabiliser, 0 also drops the tail rotor."""
-    t = lambda pts: _transform(pts, ox, oy, scale, angle)
-    draw.polygon(t(BODY), fill=fill)
-    draw.polygon(t(FIN), fill=fill)
-    draw.polygon(t(MAST), fill=fill)
-    if detail >= 2:
-        draw.polygon(t(STAB), fill=fill)
-    r = t([(ROTOR[0], ROTOR[1]), (ROTOR[2], ROTOR[3])])
-    _stroke(draw, r[0], r[1], 1.5 * scale * bold, fill)
-    if detail >= 1:
-        tr = t([(TAIL_ROTOR[0], TAIL_ROTOR[1]), (TAIL_ROTOR[2], TAIL_ROTOR[3])])
-        _stroke(draw, tr[0], tr[1], 1.2 * scale * bold, fill)
-    for x0, y0, x1, y1 in STRUTS:
-        s = t([(x0, y0), (x1, y1)])
-        _stroke(draw, s[0], s[1], 1.5 * scale * bold, fill)
-    sk = t(SKID)
-    _stroke(draw, sk[0], sk[1], 1.6 * scale * bold, fill)
-    tip = t(SKID_TIP)
-    for a, b in zip(tip, tip[1:]):
-        _stroke(draw, a, b, 1.6 * scale * bold, fill)
 
 
 # --------------------------------------------------------------------------- jungle
@@ -201,12 +141,53 @@ def draw_jungle(draw, width, base, s, fill, seed, crowns=(5, 16), lift=(3, 13), 
             draw.ellipse([(cx - r) * s, (cy - r) * s, (cx + r) * s, (cy + r) * s], fill=fill)
 
 
+# --------------------------------------------------------------------------- the seedling
+SPROUT_GREEN = "#7FCB5A"
+SPROUT_VEIN = "#4E9A3A"
+
+
+def _leaf(draw, base, tip, width, bend, fill, vein=None, vein_width=1):
+    """Almond-shaped leaf from base to tip (pixels); bend curves the whole leaf sideways."""
+    (bx, by), (tx, ty) = base, tip
+    length = math.hypot(tx - bx, ty - by)
+    nx, ny = -(ty - by) / length, (tx - bx) / length
+    mx, my = (bx + tx) / 2 + nx * bend, (by + ty) / 2 + ny * bend
+    draw.polygon(_bezier(base, (mx + nx * width, my + ny * width), tip, 40)
+                 + _bezier(tip, (mx - nx * width, my - ny * width), base, 40), fill=fill)
+    if vein:
+        rib = _bezier(base, (mx + nx * width * 0.15, my + ny * width * 0.15), tip, 40)
+        draw.line(rib[:33], fill=vein, width=vein_width, joint="curve")
+
+
+def draw_sprout(draw, ox, oy, u, bold=False, outline=None) -> None:
+    """A two-leaf seedling like the 🌱 emoji in a 64-unit box at (ox, oy), u pixels per unit.
+    bold fattens it for small icons; outline draws a dark edge round it first."""
+    p = lambda x, y: (ox + x * u, oy + y * u)  # noqa: E731
+    stem = [p(x, y) for x, y in _bezier((32, 56), (33.6, 43), (31.6, 30), 40)]
+    leaves = [((31.5, 32.5), (8, 19), 10.5 if bold else 9.5, 1.5),
+              ((32, 30.5), (55, 11), 11.5 if bold else 10.5, -2.0)]
+    edge = 1.3 if bold else 1.0
+    for fill, grow in ((outline, edge), (rgba(SPROUT_GREEN), 0)):
+        if fill is None:
+            continue
+        _tapered(draw, stem, ((5.6 if bold else 4.4) + 2 * grow) * u, ((4.0 if bold else 3.0) + 2 * grow) * u, fill)
+        for (bx, by), (tx, ty), width, bend in leaves:
+            length = math.hypot(tx - bx, ty - by)
+            ex, ey = (tx - bx) / length * grow, (ty - by) / length * grow
+            vein = rgba(SPROUT_VEIN) if not bold and not grow else None
+            _leaf(draw, p(bx - ex, by - ey), p(tx + 1.4 * ex, ty + 1.4 * ey), (width + 1.2 * grow) * u, bend * u,
+                  fill, vein, max(1, round(1.1 * u)))
+
+
 # --------------------------------------------------------------------------- header
 HEADER_W, HEADER_H = 480, 156
+MARK_X, MARK_Y, MARK_UNIT = 16, 16, 0.8  # the seedling's 64-unit box: stem on the baseline
+TITLE_X = 66
 
 
 def make_header(path: Path, scale: int) -> None:
-    """The one bold element: night sky warming to a low sun, the Huey crossing it, jungle and palms."""
+    """The one bold element: night sky warming to a low sun over jungle and palms, with the seedling
+    beside the app's name."""
     S = 4 * scale  # drawn at 4x the output size, then reduced
     W, H = HEADER_W * S, HEADER_H * S
     horizon = 128
@@ -233,18 +214,16 @@ def make_header(path: Path, scale: int) -> None:
     ImageDraw.Draw(mist).rectangle([0, 134 * S, W, 146 * S], fill=rgba("#C7826A", 120))
     img.alpha_composite(mist.filter(ImageFilter.GaussianBlur(4 * S)))
 
-    d = ImageDraw.Draw(img)
-    draw_huey(d, 352 * S, 94 * S, 0.92 * S, rgba(HELI))
-
     # near jungle: canopy and palms in the window's own body colour, so the scene runs into the window
     near = ImageDraw.Draw(img)
     draw_jungle(near, HEADER_W, 152, S, rgba(TREELINE), seed=3, crowns=(6, 18), lift=(5, 17), emergent=5)
     for (bx, h, lean, seed) in ((52, 52, -7, 1), (72, 38, 6, 2), (436, 56, 8, 4), (458, 40, -5, 5), (226, 30, 4, 6)):
         draw_palm(near, bx * S, 146 * S, h, lean, S, rgba(TREELINE), seed=seed)
 
-    # wordmark
+    # the seedling and the wordmark
+    draw_sprout(near, MARK_X * S, MARK_Y * S, MARK_UNIT * S)
     title = ImageFont.truetype(str(FONTS / "barlow-condensed-latin-600-normal.woff2"), 36 * S)
-    near.text((23 * S, 26 * S), "SYN Vietnam Seeder", font=title, fill=rgba(HAZE))
+    near.text((TITLE_X * S, 26 * S), "SYN Vietnam Seeder", font=title, fill=rgba(HAZE))
 
     img = img.resize((HEADER_W * scale, HEADER_H * scale), Image.LANCZOS).convert("RGB")
     img.save(path)
@@ -323,6 +302,8 @@ def make_widgets(out: Path, scale: int) -> None:
         "chip": box(32, 30, 4, TREELINE, border=EDGE),
         "chip-hover": box(32, 30, 4, "#1F2C24", border="#526A5A"),
         "chip-on": box(32, 30, 4, "#3A2F1D", border=FIRST_LIGHT, bw=1.5),
+        "chip-focus": box(32, 30, 4, TREELINE, border="#B88A4A", bw=1.5),
+        "chip-on-focus": box(32, 30, 4, "#3A2F1D", border="#FFE3B3", bw=1.5),
         # time pickers
         "field": box(32, 30, 4, UNDERGROWTH, border=EDGE),
         "field-hover": box(32, 30, 4, "#22312A", border="#526A5A"),
@@ -344,133 +325,33 @@ TILE_TOP = "#131D29"
 TILE_MID = "#33293D"
 TILE_LOW = "#8E4A3D"
 
-# Hand-placed Huey for the two smallest sizes ('#' = helicopter), so they stay crisp.
-HUEY_16 = """
-................
-................
-................
-................
-..###########...
-.......#........
-.....####...#...
-...#######..##..
-..############..
-..#######.......
-...#...#........
-..#######.......
-................
-................
-................
-................
-"""
-HUEY_20 = """
-....................
-....................
-....................
-....................
-....................
-....................
-..###############...
-.........#..........
-.......####......#..
-.....#########..##..
-...###############..
-..###########.......
-..##########........
-...#.....#..........
-..##########........
-....................
-....................
-....................
-....................
-....................
-"""
-HUEY_24 = """
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-...#################....
-...........#............
-.........#####.......#..
-......##########....##..
-....##################..
-...##############.......
-...############.........
-.....#.....#............
-..############..........
-........................
-........................
-........................
-........................
-........................
-........................
-........................
-"""
-# 32 px, written as runs of filled pixels per row: {row: [(first x, last x), ...]}
-HUEY_32_RUNS = {10: [(3, 26)], 11: [(15, 15)], 12: [(12, 18), (28, 28)], 13: [(9, 20), (27, 28)],
-                14: [(7, 21), (26, 28)], 15: [(5, 28)], 16: [(4, 24)], 17: [(4, 19)], 18: [(5, 18)],
-                19: [(3, 3), (7, 7), (16, 16)], 20: [(4, 19)]}
-HUEY_32 = "\n".join("".join("#" if any(a <= x <= b for a, b in HUEY_32_RUNS.get(y, [])) else "."
-                             for x in range(32)) for y in range(32))
-MASKS = {16: HUEY_16, 20: HUEY_20, 24: HUEY_24, 32: HUEY_32}
-DISCS = {16: (8.0, 8.5, 6.7), 20: (10.0, 10.5, 8.5), 24: (12.0, 12.5, 10.2), 32: (16.0, 16.5, 13.4)}  # x, y, r
-
-
-def _mask(text: str) -> list[str]:
-    return [row for row in text.strip("\n").split("\n")]
-
 
 def icon_image(size: int) -> Image.Image:
-    """The app icon at one size. Sun disc with the Huey across it on a dusk tile; the treeline and
-    palm only from 40 px up, a thicker Huey at 20-32 px, and hand-placed pixels at 16 and 24 px."""
+    """The app icon at one size: the seedling in front of a rising sun on a dusk tile. From 48 px a
+    strip of jungle runs along the horizon; at 32 px and below the seedling is drawn fatter."""
     S = 16 if size <= 64 else 4
     N = size * S
-    tiny = size in MASKS
-    big = size >= 64
-    # tile
-    tile = gradient(N, N, [(0, TILE_TOP), (0.5, TILE_MID), (1, TILE_LOW)])
-    mask = Image.new("L", (N, N), 0)
-    inset = 0 if size <= 32 else N * 0.03
-    radius = N * (0.19 if size <= 32 else 0.22)
-    ImageDraw.Draw(mask).rounded_rectangle([inset, inset, N - 1 - inset, N - 1 - inset], radius=radius, fill=255)
-    if not tiny:
-        tile.alpha_composite(radial_glow(N, N, N * 0.5, N * 0.6, N * 0.7, "#F7A55A", 0.45))
-    # sun disc: as big as the tile allows at small sizes
-    if tiny:
-        cx, cy, r = (v * S for v in DISCS[size])
-    else:
-        cx, cy, r = N * 0.5, N * 0.55, N * (0.36 if big else 0.40)
+    u = N / 64
+    tile = gradient(N, N, [(0, TILE_TOP), (0.5, TILE_MID), (0.82, TILE_LOW), (1, "#C0603F")])
+    cx, cy, r = 32 * u, 50 * u, 19 * u
+    tile.alpha_composite(radial_glow(N, N, cx, cy, 40 * u, "#F7A55A", 0.6, sx=1.4))
     disc = gradient(N, N, [(0, SUN_CORE), (1, SUN_EDGE)], cy - r, cy + r)
     dmask = Image.new("L", (N, N), 0)
     ImageDraw.Draw(dmask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
     tile.paste(disc, (0, 0), dmask)
     d = ImageDraw.Draw(tile)
-    if size >= 40:
-        rough = 0.45 * size / 64
-        draw_jungle(d, size, size * 0.97, S, rgba(TREELINE), seed=11, crowns=(8 * rough, 22 * rough),
-                    lift=(6 * rough, 15 * rough), emergent=1)
-    if not tiny:
-        # fit the Huey (units x -12..100, y -8..27) inside the tile
-        scale = N * (0.80 if big else 0.96) / 112
-        ox = N * 0.5 + (50 - 44) * scale
-        oy = N * (0.47 if big else 0.52) + (12 - 9.8) * scale
-        bold = 1.0 if size >= 64 else 1.6
-        draw_huey(d, ox, oy, scale, rgba(HELI), bold=bold, detail=2 if size >= 64 else 1)
+    if size >= 48:
+        draw_jungle(d, 64, 57, u, rgba(TREELINE), seed=11, crowns=(4, 9), lift=(2, 6), emergent=0)
+    d.ellipse([6 * u, 53 * u, 58 * u, 76 * u], fill=rgba(TREELINE))
+    draw_sprout(d, 0, 0, u, bold=size <= 32, outline=rgba(TREELINE))
+    mask = Image.new("L", (N, N), 0)
+    inset = 0 if size <= 32 else N * 0.03
+    ImageDraw.Draw(mask).rounded_rectangle([inset, inset, N - 1 - inset, N - 1 - inset],
+                                           radius=N * (0.19 if size <= 32 else 0.22), fill=255)
     out = Image.new("RGBA", (N, N), (0, 0, 0, 0))
     out.paste(tile, (0, 0), mask)
     out = out.resize((size, size), Image.LANCZOS)
-    if tiny:
-        px = out.load()
-        for y, row in enumerate(_mask(MASKS[size])):
-            for x, ch in enumerate(row):
-                if ch == "#":
-                    px[x, y] = rgba(HELI)
-    elif size <= 48:
+    if size <= 48:
         out = out.filter(ImageFilter.UnsharpMask(radius=0.6, percent=50, threshold=0))
     return out
 

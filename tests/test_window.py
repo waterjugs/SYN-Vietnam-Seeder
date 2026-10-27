@@ -1,4 +1,9 @@
+import os
+import shutil
+import subprocess
+import sys
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
@@ -6,16 +11,18 @@ from seeder import crcon, schedule, window
 from seeder.config import Config
 
 LOAD_SERVER = window.SetupWindow._load_server  # the fixture swaps it out
+ROOT = Path(__file__).resolve().parent.parent
+
+needs_display = pytest.mark.skipif(os.name != "nt" and not os.environ.get("DISPLAY"), reason="no display for Tk")
 
 
 @pytest.fixture
 def calls(monkeypatch, tmp_path):
     """Records what the window asks of the scheduler and the seeder; nothing real happens."""
-    try:
-        tk.Tk().destroy()
-    except tk.TclError:
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
         pytest.skip("no display for Tk")
     monkeypatch.setenv("APPDATA", str(tmp_path))  # config.json lands here
+    monkeypatch.setattr(window, "_make_dpi_aware", lambda: None)  # once per process; see the last test
     made = []
     monkeypatch.setattr(schedule, "is_scheduled", lambda: True)
     monkeypatch.setattr(schedule, "schedule", lambda start: made.append(("schedule", start)))
@@ -33,8 +40,12 @@ def win(calls):
     w.root.destroy()
 
 
-@pytest.mark.parametrize("dpi", [96, 144, 192])  # 100%, 150% (resized from 2x) and 200%
-def test_opens_at_any_scaling(calls, monkeypatch, dpi):
+@pytest.mark.parametrize("dpi", [96, 120, 144, 192])  # 100%, 125% and 150% (resized from 2x), 200%
+def test_opens_at_any_scaling(calls, monkeypatch, tmp_path, dpi):
+    # The exe unpacks its images under the user's own name, e.g. C:\Users\José\AppData\Local\Temp
+    assets = tmp_path / "José" / "assets"
+    shutil.copytree(window.ASSETS, assets)
+    monkeypatch.setattr(window, "ASSETS", assets)
     monkeypatch.setattr(tk.Misc, "winfo_fpixels", lambda self, distance: float(dpi))
     w = window.SetupWindow(Config())
     w.root.update()
@@ -49,14 +60,33 @@ def test_shows_settings(win):
     assert win.status.cget("text").startswith("Seeds every day at 06:35.")
 
 
+def test_clock_says_am_or_pm(win):
+    assert win.clock.cget("text") == "6:35 AM"
+    for hour, shown in (("00", "12:35 AM"), ("12", "12:35 PM"), ("19", "7:35 PM")):
+        win.hour.set(hour)
+        win.hour.event_generate("<<ComboboxSelected>>")
+        assert win.clock.cget("text") == shown
+
+
 def test_server_count(win):
     win._show_server(37)
     assert (win.count.cget("text"), win.need.cget("text")) == ("37", "Needs 43 more")
+    assert win.count.winfo_manager() == "grid"
     win._show_server(84)
     assert win.need.cget("text") == "Seeded"
     win._show_server(None)
     assert str(win.server.cget("text")) == "Couldn't reach the server stats."
-    assert not win.count.winfo_ismapped()
+    assert win.count.winfo_manager() == ""  # hidden
+
+
+@pytest.mark.parametrize("threshold", [0, 80, 100, 150])
+def test_threshold_label_stays_on_the_meter(calls, threshold):
+    w = window.SetupWindow(Config(seeded_threshold=threshold))
+    label = w.meter.find_all()[-1]
+    assert w.meter.itemcget(label, "text") == f"Seeded at {threshold}"
+    x0, _, x1, _ = w.meter.bbox(label)
+    assert 0 <= x0 and x1 <= w.content_width
+    w.root.destroy()
 
 
 def test_load_server_shows_the_count(win, monkeypatch):
@@ -110,3 +140,22 @@ def test_stop_with_nothing_running(win, monkeypatch):
     monkeypatch.setattr(window.instance, "stop_seeding", lambda: False)
     win.stop()
     assert win.status.cget("text") == "Nothing is seeding right now."
+
+
+@needs_display
+def test_opens_in_a_fresh_process(tmp_path):
+    """The way the exe starts, DPI awareness included, which can only be set once per process."""
+    script = """if True:
+        from seeder import schedule, window
+        from seeder.config import Config
+        schedule.is_scheduled = lambda: False
+        window.SetupWindow._load_server = lambda self: None
+        w = window.SetupWindow(Config())
+        w.root.update()
+        assert w.root.winfo_width() == w._image("header").width(), w.root.winfo_width()
+        w.root.destroy()
+    """
+    env = {**os.environ, "APPDATA": str(tmp_path)}
+    done = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True,
+                          timeout=120)
+    assert done.returncode == 0, done.stderr
