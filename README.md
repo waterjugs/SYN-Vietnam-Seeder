@@ -60,7 +60,8 @@ python -m pytest
 python -m seeder --seed      # run a seeding session now (Windows)
 python -m seeder --record    # screenshot every 3s, for making templates
 python tools/crop_templates.py <dir>   # re-cut templates after a game patch
-build.bat                    # makes dist\SynSeeder.exe
+python tools/make_assets.py  # redraw the window's images and the icon (needs Pillow)
+build.bat                    # makes dist\SynSeeder.exe from SynSeeder.spec
 ```
 
 GitHub Actions runs the tests and builds `SynSeeder.exe` on every push.
