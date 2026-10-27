@@ -62,25 +62,53 @@ def _make_dpi_aware() -> None:
             pass
 
 
-def _theme_title_bar(root: tk.Tk) -> None:
-    """Dark title bar on Windows 10 and 11; on 11 also coloured like the header's sky."""
+def _dress_for_windows(root: tk.Tk) -> None:
+    """Sharp icons at the screen's scaling, and a dark title bar (Windows 10 1809 and later)
+    that Windows 11 also colours like the header's sky.
+
+    Tk can't read the sizes in the .ico, so it would stretch the 16 px icon for the taskbar.
+    Only looks: if any of it fails, the window opens as it is.
+    """
     if os.name != "nt":
         return
     import ctypes
+    from ctypes import wintypes
 
     def colorref(colour: str) -> int:
         r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
         return r | g << 8 | b << 16
 
-    hwnd = ctypes.windll.user32.GetParent(root.winfo_id())  # type: ignore[attr-defined]
-    # DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR; older Windows ignores them.
-    for attribute, value in ((20, 1), (35, colorref(NIGHT)), (36, colorref(HAZE))):
-        value = ctypes.c_int(value)
-        try:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
-                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
-        except (AttributeError, OSError):
-            return
+    try:
+        user32, dwmapi = ctypes.WinDLL("user32"), ctypes.WinDLL("dwmapi")  # own copies, own prototypes
+        user32.GetParent.argtypes = [wintypes.HWND]
+        user32.GetParent.restype = wintypes.HWND
+        user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+        user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int,
+                                      ctypes.c_int, wintypes.UINT]
+        user32.LoadImageW.restype = wintypes.HANDLE
+        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.SendMessageW.restype = wintypes.LPARAM
+        dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
+        hwnd = user32.GetParent(root.winfo_id())  # Tk's outer window, the one with the title bar
+
+        # ICON_SMALL at SM_CXSMICON, ICON_BIG at SM_CXICON, each read from the .ico at that size
+        for which, metric in ((0, 49), (1, 11)):
+            size = user32.GetSystemMetrics(metric)
+            icon = user32.LoadImageW(None, str(ASSETS / "synseeder.ico"), 1, size, size, 0x10)  # LR_LOADFROMFILE
+            if icon:
+                user32.SendMessageW(hwnd, 0x80, which, icon)  # WM_SETICON
+
+        def set_attribute(attribute: int, value: int) -> int:
+            value = ctypes.c_int(value)
+            return dwmapi.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
+
+        if set_attribute(20, 1):  # DWMWA_USE_IMMERSIVE_DARK_MODE; Windows 10 before 20H1 calls it 19
+            set_attribute(19, 1)
+        set_attribute(35, colorref(NIGHT))  # DWMWA_CAPTION_COLOR, Windows 11
+        set_attribute(36, colorref(HAZE))   # DWMWA_TEXT_COLOR, Windows 11
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        log.debug("Couldn't theme the window", exc_info=True)
 
 
 def _resized(path: Path, factor: float) -> str:
@@ -88,7 +116,8 @@ def _resized(path: Path, factor: float) -> str:
     import cv2
     import numpy as np
 
-    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    # imdecode copes with non-ASCII paths (the exe unpacks under the user's name); imread doesn't
+    image = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
     height, width = image.shape[:2]
     size = (max(1, round(width * factor)), max(1, round(height * factor)))
     method = cv2.INTER_AREA if factor < 1 else cv2.INTER_CUBIC
@@ -173,6 +202,11 @@ class SetupWindow:
                                    font=self.font_body)
         self.minute.set(minute if minute in MINUTES else "00")
         self.minute.grid(row=0, column=2)
+        self.clock = ttk.Label(when, style="Muted.TLabel")  # the pickers are 24-hour; this says AM or PM
+        self.clock.grid(row=0, column=3, padx=(px(12), 0))
+        for picker in (self.hour, self.minute):
+            picker.bind("<<ComboboxSelected>>", lambda _: self._show_clock())
+        self._show_clock()
 
         ttk.Label(body, text="Game launcher").grid(row=4, column=0, sticky="w", pady=(px(10), 0))
         self.launcher = tk.StringVar(value=config.launcher)
@@ -238,11 +272,9 @@ class SetupWindow:
         return self._images[name]
 
     def _icon(self) -> None:
-        try:  # every size Windows may want, from the .ico
-            self.root.iconbitmap(default=str(ASSETS / "synseeder.ico"))
-        except tk.TclError:  # not Windows
-            self.root.iconphoto(True, *(tk.PhotoImage(master=self.root, file=str(ASSETS / f"icon-{s}.png"))
-                                        for s in (48, 32, 16)))
+        # On Windows, _dress_for_windows swaps in the .ico's own size for the screen's scaling.
+        self.root.iconphoto(True, *(tk.PhotoImage(master=self.root, file=str(ASSETS / f"icon-{s}.png"))
+                                    for s in (48, 32, 16)))
 
     def _show(self) -> None:
         """Centres the window, themes its title bar, then makes it visible."""
@@ -251,7 +283,8 @@ class SetupWindow:
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 3)
         self.root.geometry(f"+{x}+{y}")
-        _theme_title_bar(self.root)
+        self.root.update_idletasks()  # moves it now, while it's still invisible
+        _dress_for_windows(self.root)
         self.root.attributes("-alpha", 1.0)
 
     def _fonts(self) -> None:
@@ -290,8 +323,9 @@ class SetupWindow:
             style.map(f"{name}.TButton", foreground=[("disabled", MIST)])
 
         # Steam / Epic as two chips
-        style.element_create("Chip.border", "image", img("chip"), ("selected", img("chip-on")),
-                             ("active", img("chip-hover")), border=px(6), padding=0, sticky="nsew")
+        style.element_create("Chip.border", "image", img("chip"), ("selected", "focus", img("chip-on-focus")),
+                             ("selected", img("chip-on")), ("active", img("chip-hover")),
+                             ("focus", img("chip-focus")), border=px(6), padding=0, sticky="nsew")
         style.layout("Chip.TRadiobutton", [("Chip.border", {"sticky": "nsew", "children": [
             ("Radiobutton.padding", {"sticky": "nsew", "children": [("Radiobutton.label", {"sticky": "nsew"})]})]})])
         style.configure("Chip.TRadiobutton", foreground=MIST, padding=(px(12), px(4)), anchor="center")
@@ -305,7 +339,7 @@ class SetupWindow:
             ("Dawn.Checkbutton.indicator", {"side": "left", "sticky": ""}),
             ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
                 ("Checkbutton.label", {"sticky": "nsew"})]})]})])
-        style.configure("Dawn.TCheckbutton", padding=(0, px(2)))
+        style.configure("Dawn.TCheckbutton", padding=(0, px(2)), focuscolor="#B88A4A")
         style.map("Dawn.TCheckbutton", background=[("active", TREELINE)], foreground=[("active", HAZE)])
 
         # Hour and minute pickers, and their drop-down lists
@@ -346,10 +380,20 @@ class SetupWindow:
             seeded = count >= self.config.seeded_threshold
             x = left + (right - left) * min(count, PLAYERS_MAX) / PLAYERS_MAX
             c.create_line(left, y, x, y, fill=PADDY if seeded else FIRST_LIGHT, width=thick, capstyle="round")
-        tick = left + (right - left) * self.config.seeded_threshold / PLAYERS_MAX
+        tick = left + (right - left) * min(max(self.config.seeded_threshold, 0), PLAYERS_MAX) / PLAYERS_MAX
         c.create_line(tick, px(1), tick, px(13), fill=HAZE, width=px(2))
-        c.create_text(tick, px(15), text=f"Seeded at {self.config.seeded_threshold}", anchor="n", fill=MIST,
-                      font=self.font_small)
+        label = c.create_text(tick, px(15), text=f"Seeded at {self.config.seeded_threshold}", anchor="n",
+                              fill=MIST, font=self.font_small)
+        x0, _, x1, _ = c.bbox(label)
+        c.move(label, max(0, -x0) - max(0, x1 - width), 0)  # near either end, kept on the meter
+
+    def _show_clock(self) -> None:
+        try:
+            hour = int(self.hour.get())
+        except ValueError:  # a hand-edited settings file
+            self.clock.config(text="")
+            return
+        self.clock.config(text=f"{hour % 12 or 12}:{self.minute.get()} {'AM' if hour < 12 else 'PM'}")
 
     def _show_server(self, count: int | None) -> None:
         if count is None:
