@@ -25,9 +25,9 @@ MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]
 # Images drawn by tools/make_assets.py: 100% scaling in assets/, 200% in assets/2x.
 ASSETS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets"
 
-# "Dawn insertion": a jungle at first light.
-NIGHT = "#0C1823"        # top of the header sky; the title bar on Windows 11
-TREELINE = "#121C17"     # window body, same as the trees at the bottom of the header
+# Night sky warming to dusk over a jungle-green window, with amber for first light.
+NIGHT = "#0C1823"        # top of the header's sky; the title bar on Windows 11
+TREELINE = "#121C17"     # window body
 UNDERGROWTH = "#1D2A22"  # fields, list backgrounds
 EDGE = "#34463B"         # hairlines
 HAZE = "#ECE3D0"         # main text
@@ -166,7 +166,7 @@ class SetupWindow:
         tk.Label(self.root, image=header, borderwidth=0, highlightthickness=0,
                  background=TREELINE).grid(row=0, column=0, sticky="nw")
         self.content_width = header.width() - 2 * px(MARGIN)  # so nothing below is wider than the picture
-        body = ttk.Frame(self.root, padding=(px(MARGIN), px(6), px(MARGIN), px(14)))
+        body = ttk.Frame(self.root, padding=(px(MARGIN), px(18), px(MARGIN), px(14)))
         body.grid(row=1, column=0, sticky="nsew")
         body.columnconfigure(0, minsize=px(144))
         body.columnconfigure(1, weight=1)
