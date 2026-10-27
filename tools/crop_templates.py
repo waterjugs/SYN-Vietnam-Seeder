@@ -22,12 +22,12 @@ BOXES = {
     "browser_refresh": ("browser", 282, 1336, 394, 1373),  # text only; the key icon matches other hints
     "switch_team": ("units", 345, 1215, 527, 1242),
     "faction_nva": ("units", 74, 1173, 184, 1283),
-    "squad_join": ("units", 1268, 286, 1318, 336),
     "infantry_create": ("units", 1012, 216, 1092, 252),
     "roles_confirm": ("roles", 281, 1338, 459, 1372),
     # The "CONFIRM ROLE" hint sits on the 3D scene, which changes; the title bar doesn't.
     "roles_confirm.title": ("roles", 71, 27, 357, 78),
-    # Joining someone else's squad shows SELECT A ROLE instead of EDIT ROLES.
+    # Joining someone else's squad shows SELECT A ROLE instead of EDIT ROLES
+    # (the seeder doesn't, but the game might put us in one).
     "roles_confirm.select": ("select_role", 71, 27, 445, 78),
     "admin_yes": ("roles_msg", 2203, 598, 2302, 629),
     "deploy_button": ("deploy", 2110, 1301, 2317, 1343),

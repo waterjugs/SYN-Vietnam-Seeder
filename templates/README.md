@@ -19,11 +19,10 @@ screenshots).
 | `force_us.png` / `force_nva.png` | The US and NVA cards on Select Force |
 | `switch_team.png` | Units screen (the game has already picked a team) |
 | `faction_nva.png` | NVA badge on Units/Deployment, to tell which team we're on |
-| `squad_join.png` | Join arrow on an infantry squad |
-| `infantry_create.png` | The + that creates an infantry squad |
+| `infantry_create.png` | The + that creates an infantry squad; clicked (the seeder never joins someone else's squad) |
 | `create_unit.png` | "Create a Unit" popup that the + opens |
 | `create_unit_button.png` | Its CREATE UNIT button; clicked |
-| `roles_confirm.png`, `roles_confirm.title.png`, `roles_confirm.select.png` | Edit Roles (own squad) or Select a Role (someone else's squad), by the F CONFIRM ROLE hint or either title bar; F confirms |
+| `roles_confirm.png`, `roles_confirm.title.png`, `roles_confirm.select.png` | Edit Roles (own squad) or Select a Role (someone else's squad, in case the game puts us in one), by the F CONFIRM ROLE hint or either title bar; F confirms |
 | `admin_yes.png` | Admin message popup; clicked to close it |
 | `deploy_button.png` | Deployment screen; F deploys |
 | `game_menu_leave.png` | Esc menu open by accident; Esc closes it |

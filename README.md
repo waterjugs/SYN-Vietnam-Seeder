@@ -3,9 +3,9 @@
 Seeds the **Syndicate | Competitive Server** on Hell Let Loose: Vietnam.
 At a scheduled time it checks the server's population through CRCON. If
 the server has fewer than 80 players, it launches the game, joins through
-the in-game server browser, picks the team with fewer players, joins or
-creates an infantry squad and deploys. It stays in until the server
-reaches 80, then closes the game.
+the in-game server browser, picks the team with fewer players, creates
+its own infantry squad (it never joins someone else's) and deploys. It
+stays in until the server reaches 80, then closes the game.
 
 Tested end to end on a live PC with game build v1.7 (October 2026).
 
@@ -34,8 +34,10 @@ straight away and **Stop seeding** ends one and closes the game.
 - On a fresh join it picks the team with fewer players. When it rejoins
   (the game skips team choice then), it keeps its team unless that team is
   2+ players ahead, in which case it switches once.
-- Rejoins after a kick, redeploys on a new map, restarts the game after a
-  crash (up to 3 times), and strafes now and then to dodge the idle kick.
+- Rejoins after a kick, redeploys after dying, creates a new squad when
+  the map changes (if the server still isn't seeded), restarts the game
+  after a crash (up to 3 times), and strafes now and then to dodge the
+  idle kick.
 - Gives up after 4 hours whatever happens.
 - Press **Ctrl+Alt+End** to stop a run (or use **Stop seeding** in the
   window). It only sends keys while the game is the active window, so

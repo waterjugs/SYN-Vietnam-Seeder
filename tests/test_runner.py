@@ -51,7 +51,8 @@ def test_full_join_then_leaves_once_seeded():
     fetch = statuses(10, 10, 40, 79, 80)
     assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
     assert screen.typed == ["syndicate"]
-    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "admin_yes", "force_us", "squad_join"]
+    assert screen.clicks == ["menu_enlist", "browser_search", "browser_join", "admin_yes", "force_us",
+                             "infantry_create", "create_unit_button"]  # never an open squad
     assert screen.keys[:2] == ["space", "enter"]
     assert [k for k in screen.keys if k == "f"] == ["f", "f"]
     assert game.launches == 1 and not game.is_running
@@ -80,21 +81,68 @@ def test_switches_to_the_short_team_once():
     screen.transitions = path
 
     def fetch(_url):
-        return ServerStatus("S", 20 if not screen.clicks.count("squad_join") else 80, 7, 13, 0)
+        return ServerStatus("S", 20 if not screen.clicks.count("create_unit_button") else 80, 7, 13, 0)
 
     runner.seed(config, game, screen, fetch, clock)
     assert screen.clicks.count("switch_team") == 1
-    assert screen.clicks.index("switch_team") < screen.clicks.index("squad_join")
+    assert screen.clicks.index("switch_team") < screen.clicks.index("infantry_create")
 
 
-def test_creates_a_squad_when_none_open():
+def test_always_creates_its_own_squad():
     config, game, screen, clock = make()
-    path = dict(HAPPY_PATH)
-    path["browser_join"] = ({"server_row", "browser_join", "browser_refresh"}, {"switch_team", "infantry_create"})
-    screen.transitions = path
     runner.seed(config, game, screen, statuses(10, 80), clock)
     assert screen.clicks[-2:] == ["infantry_create", "create_unit_button"]
     assert "roles_confirm" not in screen.visible and [k for k in screen.keys if k == "f"] == ["f", "f"]
+
+
+def test_never_joins_someone_elses_squad():
+    screen = FakeScreen({})
+    screen.visible = {"switch_team"}
+    screen.find_all = lambda name, region=None: [(100, 300), (100, 360)]  # open squads
+    screen.find = lambda name, region=None: (200, 100) if name == "infantry_create" else None
+    clicked = []
+    screen.click = clicked.append
+    nav = flow.Navigator(screen, Config(), FakeClock(), lambda: None)
+    for _ in range(3):
+        nav.handle("switch_team")
+    assert clicked == [(200, 100)] * 3  # the + every time, never a squad
+
+
+def test_creates_a_new_squad_after_a_map_change():
+    # A new map sends everyone back to Units; still under 80, so lead a new squad.
+    config, game, screen, clock = make()
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            screen.visible = {"switch_team", "squad_join", "infantry_create"}
+        return ServerStatus("S", 80 if calls["n"] >= 6 else 20, 10, 10, 0)
+
+    assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("infantry_create") == 2 and screen.clicks.count("create_unit_button") == 2
+    assert "squad_join" not in screen.clicks
+    assert game.launches == 1
+
+
+def test_leaves_instead_of_a_new_squad_once_seeded_at_a_map_change():
+    config, game, screen, _ = make()
+    calls = {"n": 0}
+
+    class MapChangeClock(FakeClock):
+        def sleep(self, seconds):
+            super().sleep(seconds)
+            if calls["n"] == 2 and seconds == config.poll_seconds:
+                # The new map loads while it waits; the next count says seeded.
+                screen.visible = {"switch_team", "squad_join", "infantry_create"}
+
+    def fetch(_url):
+        calls["n"] += 1
+        return ServerStatus("S", 80 if calls["n"] >= 3 else 20, 10, 10, 0)
+
+    assert runner.seed(config, game, screen, fetch, MapChangeClock()) is runner.Outcome.SEEDED
+    assert screen.clicks.count("infantry_create") == 1  # the count is checked before the screen
+    assert not game.is_running
 
 
 def test_select_force_tries_the_other_card_when_one_is_locked():
@@ -343,21 +391,6 @@ def test_refreshes_when_server_is_missing():
     nav = flow.Navigator(screen, Config(), clock, lambda: None)
     assert not nav.get_in(timeout=100)
     assert 4 <= screen.keys.count("r") <= 6  # every ~20 s, not every tick
-
-
-def test_tries_another_squad_when_one_is_full():
-    screen = FakeScreen({})
-    screen.visible = {"switch_team"}
-    squads = [(100, 300), (100, 360)]
-    screen.find_all = lambda name, region=None: squads if name == "squad_join" else []
-    screen.find = lambda name, region=None: (200, 100) if name == "infantry_create" else None
-    clicked = []
-    screen.click = clicked.append
-    nav = flow.Navigator(screen, Config(), FakeClock(), lambda: None)
-    for _ in range(3):
-        nav.handle("switch_team")
-    # Each squad once (both full), then make our own.
-    assert clicked == [(100, 300), (100, 360), (200, 100)]
 
 
 def test_skips_when_pc_locked():

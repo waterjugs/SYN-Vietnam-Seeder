@@ -3,9 +3,11 @@
 import ctypes
 import importlib.util
 import logging
+import os
 import sys
 import types
 
+import psutil
 import pytest
 
 import seeder
@@ -21,6 +23,14 @@ class FakeWinapi(types.ModuleType):
         self.idle = 0.0
         self.calls: list[str] = []
         self.target = None
+        self.front_pid = 0
+        self.restoring = False  # the game is in front but still minimised
+
+    def foreground_pid(self):
+        return self.front_pid
+
+    def in_front(self, hwnd):
+        return self.restoring
 
     def set_input_target(self, hwnd):
         self.target = hwnd
@@ -91,11 +101,14 @@ def test_takes_the_front_once_the_pc_is_idle(fake, game, caplog):
 
 def test_refused_takeover_taps_alt_only_once_and_logs_once(fake, game, caplog):
     fake.idle, fake.forced = 60, False
+    fake.front_pid = os.getpid()
     with caplog.at_level(logging.WARNING):
         for _ in range(4):
             assert not game.focus()
     assert [c for c in fake.calls if c.startswith("force")] == ["force+alt", "force", "force", "force"]
-    assert sum("Couldn't bring the game to the front" in r.message for r in caplog.records) == 1
+    refused = [r.message for r in caplog.records if "Couldn't bring the game to the front" in r.message]
+    assert len(refused) == 1
+    assert f"({psutil.Process().name()} has it)" in refused[0]  # says which program is in the way
     assert "flash" not in fake.calls
     assert not game.waiting_for_user()  # refused isn't the player's doing; timeouts still apply
     # Once it gets to the front, the next wait may tap Alt again.
@@ -104,6 +117,16 @@ def test_refused_takeover_taps_alt_only_once_and_logs_once(fake, game, caplog):
     fake.forced = False
     game.focus()
     assert fake.calls[-1] == "force+alt"
+
+
+def test_a_game_still_restoring_is_not_a_refusal(fake, game, caplog):
+    fake.idle, fake.forced, fake.restoring = 60, False, True
+    with caplog.at_level(logging.WARNING):
+        assert not game.focus()
+    assert not caplog.records  # nothing is in the way; it's ready on the next try
+    fake.restoring = False
+    game.focus()
+    assert fake.calls[-1] == "force+alt"  # the Alt tap wasn't used up
 
 
 def test_no_window_no_focus(fake, monkeypatch):
@@ -169,27 +192,92 @@ def test_bring_to_front_restores_a_minimised_game_once_it_is_ours(winapi):
     assert winapi.bring_to_front(1234)
 
 
-def test_force_to_front_attaches_and_always_detaches(winapi):
-    winapi.user32.GetWindowThreadProcessId.ret = 77
-    winapi.kernel32.GetCurrentThreadId.ret = 5
-    winapi.user32.AttachThreadInput.ret = 1
-    attach = []
-    winapi.user32.AttachThreadInput.ret = lambda ours, theirs, on: attach.append((ours, theirs, on)) or 1
+def sent_inputs(winapi):
+    """Records SendInput calls as lists of INPUT copies."""
+    sent = []
+    winapi.user32.SendInput.ret = lambda n, array, size: sent.append([array[i] for i in range(n)]) or n
+    return sent
+
+
+def front_after(winapi, kind, sent, monkeypatch):
+    """Windows grants the front once input of ``kind`` (mouse or keyboard) went out."""
+    monkeypatch.setattr(winapi.time, "sleep", lambda s: None)
+    state = {"front": 999}
+
+    def set_front(hwnd):
+        if any(batch[0].type == kind for batch in sent):
+            state["front"] = hwnd
+        return state["front"] == hwnd
+
+    winapi.user32.SetForegroundWindow.ret = set_front
+    winapi.user32.GetForegroundWindow.ret = lambda: state["front"]
+
+
+def test_force_to_front_sends_a_zero_mouse_move_then_asks(winapi, monkeypatch):
+    sent = sent_inputs(winapi)
+    front_after(winapi, winapi.INPUT_MOUSE, sent, monkeypatch)
+    winapi.set_input_target(1234)  # the game, not in front: the move goes out anyway
+    assert winapi.force_to_front(1234)
+    assert len(sent) == 1 and len(sent[0]) == 1
+    move = sent[0][0]
+    assert move.type == winapi.INPUT_MOUSE and move.u.mi.dwFlags == winapi.MOUSEEVENTF_MOVE
+    assert (move.u.mi.dx, move.u.mi.dy) == (0, 0)  # the cursor doesn't move
+    assert "AttachThreadInput" not in winapi.calls
+
+
+def test_force_to_front_falls_back_to_an_alt_tap(winapi, monkeypatch):
+    sent = sent_inputs(winapi)
+    front_after(winapi, winapi.INPUT_KEYBOARD, sent, monkeypatch)
+    assert winapi.force_to_front(1234, alt_tap=True)
+    assert [batch[0].type for batch in sent] == [winapi.INPUT_MOUSE, winapi.INPUT_KEYBOARD]
+    alt = sent[1]
+    assert [i.u.ki.wVk for i in alt] == [winapi.VK["alt"]] * 2
+    assert alt[1].u.ki.dwFlags & winapi.KEYEVENTF_KEYUP  # released again
+
+
+def test_force_to_front_without_alt_tap_sends_only_the_mouse_move(winapi, monkeypatch):
+    sent = sent_inputs(winapi)
+    front_after(winapi, winapi.INPUT_KEYBOARD, sent, monkeypatch)
     assert not winapi.force_to_front(1234, alt_tap=False)
-    assert attach == [(5, 77, True), (5, 77, False)]
-    assert "SendInput" not in winapi.calls  # no Alt when told not to
+    assert [batch[0].type for batch in sent] == [winapi.INPUT_MOUSE]
 
 
-def test_force_to_front_alt_tap_goes_out_even_though_the_game_is_not_in_front(winapi):
-    winapi.set_input_target(1234)
-    winapi.force_to_front(1234, alt_tap=True)
-    assert winapi.calls.count("SendInput") == 1
+def test_force_to_front_waits_for_windows_to_handle_the_move(winapi, monkeypatch):
+    events = []
+    monkeypatch.setattr(winapi.time, "sleep", lambda s: events.append("sleep"))
+    winapi.user32.SendInput.ret = lambda n, array, size: events.append("input") or n
+    state = {"front": 999}
+
+    def set_front(hwnd):
+        events.append("ask")
+        # Windows handles queued input a moment later: the second ask after it works.
+        if "input" in events and events[events.index("input"):].count("ask") >= 2:
+            state["front"] = hwnd
+        return state["front"] == hwnd
+
+    winapi.user32.SetForegroundWindow.ret = set_front
+    winapi.user32.GetForegroundWindow.ret = lambda: state["front"]
+    assert winapi.force_to_front(1234)
+    after = events[events.index("input") + 1:]
+    assert after[:4] == ["sleep", "ask", "sleep", "ask"]  # waits before each ask
+    assert events.count("input") == 1  # no Alt needed
+
+
+def test_force_to_front_no_alt_when_the_game_is_in_front_but_still_minimised(winapi, monkeypatch):
+    sent = sent_inputs(winapi)
+    front_after(winapi, winapi.INPUT_MOUSE, sent, monkeypatch)
+    winapi.user32.IsIconic.ret = 1  # the restore hasn't been handled yet
+    assert not winapi.force_to_front(1234, alt_tap=True)
+    assert [batch[0].type for batch in sent] == [winapi.INPUT_MOUSE]
+    assert winapi.in_front(1234)
+    winapi.user32.IsIconic.ret = 0
+    assert winapi.bring_to_front(1234)  # ready on the next try
 
 
 def test_force_to_front_leaves_a_hung_game_alone(winapi):
     winapi.user32.IsHungAppWindow.ret = 1
     assert not winapi.force_to_front(1234)
-    assert "AttachThreadInput" not in winapi.calls
+    assert "SendInput" not in winapi.calls
     assert "SetForegroundWindow" not in winapi.calls
 
 

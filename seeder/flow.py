@@ -5,8 +5,9 @@ What joining looks like in this version:
   splash ("press any button") -> main menu (ENLIST) -> server browser
   (search, JOIN on the server's row) -> Select Force (US or NVA; skipped
   when rejoining a server you were just on) -> Units (SWITCH TEAM is
-  available; join a squad, or + opens a Create a Unit popup whose CREATE
-  UNIT button makes you its squad leader) -> Edit Roles (F confirms) ->
+  available; the seeder always creates its own infantry squad: + opens a
+  Create a Unit popup whose CREATE UNIT button makes you its squad leader)
+  -> Edit Roles (F confirms) ->
   Deployment (F deploys at the selected HQ) -> in game.
 
 Admin messages pop up with a "[Y] YES" button, and Esc opens a game menu;
@@ -41,7 +42,6 @@ SCREENS = [
 ]
 
 # Parts of the Units screen (fractions of the game area, 16:9 layout).
-INFANTRY_COLUMN = (0.29, 0.10, 0.53, 0.95)
 INFANTRY_CREATE = (0.29, 0.10, 0.53, 0.22)
 FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 # The two cards on Select Force.
@@ -107,7 +107,6 @@ class Navigator:
         self.switched_team = False
         self._force_tries = 0
         self._force_team: str | None = None
-        self._tried: list[tuple[int, int]] = []
         self._last_refresh = float("-inf")
 
     def get_in(self, timeout: float, fresh_launch: bool = False, until: float = float("inf")) -> bool:
@@ -162,8 +161,6 @@ class Navigator:
             seen.add(name)
             if name not in OVERLAYS:
                 deployed = name == "deploy_button"
-            if name != "switch_team":
-                self._tried.clear()
             if name not in OVERLAYS and name != "select_force":
                 self._force_tries, self._force_team = 0, None
             self.handle(name)
@@ -252,18 +249,11 @@ class Navigator:
             self.switched_team = True
             self.screen.click(self.screen.find("switch_team"))
             return
-        # Join the first infantry squad not tried yet on this visit; a full
-        # or locked one leaves us here, so the next tick tries another.
-        for squad in sorted(self.screen.find_all("squad_join", INFANTRY_COLUMN), key=lambda p: p[1]):
-            if all(abs(squad[0] - t[0]) > 15 or abs(squad[1] - t[1]) > 15 for t in self._tried):
-                log.info("Joining an infantry squad")
-                self._tried.append(squad)
-                self.screen.click(squad)
-                return
+        # Always lead a new squad of our own, never join someone else's
+        # (Syndicate's rule for seeders), so real players have one to join.
         create = self.screen.find("infantry_create", INFANTRY_CREATE)
         if create:
-            log.info("No open squad; creating one")
-            self._tried.clear()
+            log.info("Creating an infantry squad")
             self.screen.click(create)
 
     def _on_server_row(self) -> None:

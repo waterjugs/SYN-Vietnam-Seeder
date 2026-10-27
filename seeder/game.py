@@ -125,6 +125,8 @@ class Game:
                 log.info("Brought the game to the front (mouse and keyboard idle for %ss)", round(idle))
                 self._in_front()
                 return True
+            if winapi.in_front(hwnd):
+                return False  # ours, but still restoring from minimised: ready on the next try
             self._alt_tapped = True
             wait = "refused"
         else:
@@ -135,9 +137,21 @@ class Game:
                             "and keyboard have been idle for %ss", IDLE_BEFORE_TAKEOVER)
                 winapi.flash(hwnd)
             else:
-                log.warning("Couldn't bring the game to the front; holding input until it is")
+                log.warning("Couldn't bring the game to the front (%s has it); holding input until it is",
+                            self._foreground_app())
             self._focus_wait = wait
         return False
+
+    @staticmethod
+    def _foreground_app() -> str:
+        """Name of the program whose window is in front, for the log."""
+        from . import winapi
+
+        pid = winapi.foreground_pid()
+        try:
+            return psutil.Process(pid).name() if pid else "no window"
+        except psutil.Error:
+            return "another program"
 
     def _in_front(self) -> None:
         self._focus_wait = None

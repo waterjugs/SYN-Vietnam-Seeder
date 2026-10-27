@@ -37,7 +37,7 @@ Region = tuple[float, float, float, float]
 
 REQUIRED_TEMPLATES = {
     "admin_yes", "game_menu_leave", "deploy_button", "roles_confirm", "switch_team", "server_row",
-    "browser_search", "browser_refresh", "menu_enlist", "browser_join", "faction_nva", "squad_join",
+    "browser_search", "browser_refresh", "menu_enlist", "browser_join", "faction_nva",
     "infantry_create", "select_force", "force_us", "force_nva", "create_unit", "create_unit_button",
 }
 

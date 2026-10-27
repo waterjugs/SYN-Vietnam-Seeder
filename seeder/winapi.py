@@ -21,7 +21,7 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-d
 
 INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, KEYEVENTF_SCANCODE = 0x2, 0x4, 0x8
-MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x2, 0x4
+MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x1, 0x2, 0x4
 GW_OWNER = 4
 VK = {"space": 0x20, "enter": 0x0D, "esc": 0x1B, "backspace": 0x08, "alt": 0x12}
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x1, 0x2, 0x4000
@@ -69,7 +69,6 @@ def _prototypes() -> None:
         "SetForegroundWindow": ([H], wintypes.BOOL),
         "ShowWindowAsync": ([H, ctypes.c_int], wintypes.BOOL),
         "IsHungAppWindow": ([H], wintypes.BOOL),
-        "AttachThreadInput": ([D, D, wintypes.BOOL], wintypes.BOOL),
         "GetLastInputInfo": ([ctypes.POINTER(LASTINPUTINFO)], wintypes.BOOL),
         "FlashWindowEx": ([ctypes.POINTER(FLASHWINFO)], wintypes.BOOL),
         "GetWindowRect": ([H, ctypes.POINTER(wintypes.RECT)], wintypes.BOOL),
@@ -88,7 +87,7 @@ def _prototypes() -> None:
     for name, (args, res) in specs.items():
         fn = getattr(user32, name)
         fn.argtypes, fn.restype = args, res
-    for name, (args, res) in {"GetTickCount": ([], D), "GetCurrentThreadId": ([], D)}.items():
+    for name, (args, res) in {"GetTickCount": ([], D)}.items():
         fn = getattr(kernel32, name)
         fn.argtypes, fn.restype = args, res
 
@@ -130,8 +129,9 @@ def _on_target() -> bool:
 
 
 def _send(*inputs: INPUT, always: bool = False) -> None:
-    """``always`` is for releasing keys and buttons: harmless in any window,
-    and they mustn't stay held down."""
+    """``always`` sends even when the game isn't in front: for releasing keys
+    and buttons (harmless in any window, and they mustn't stay held down) and
+    for force_to_front()'s nudges."""
     if not always and not _on_target():
         return
     _mark_own_input()
@@ -186,6 +186,10 @@ def client_rect(hwnd: int) -> tuple[int, int, int, int] | None:
     return origin.x, origin.y, rect.right, rect.bottom
 
 
+def in_front(hwnd: int) -> bool:
+    return user32.GetForegroundWindow() == hwnd
+
+
 def foreground_pid() -> int:
     hwnd = user32.GetForegroundWindow()
     return window_pid(hwnd) if hwnd else 0
@@ -211,29 +215,40 @@ def bring_to_front(hwnd: int) -> bool:
 
 def force_to_front(hwnd: int, alt_tap: bool = True) -> bool:
     """Makes hwnd the foreground window even though another program has it.
-    Only for when nobody is using the PC. Returns True if it worked."""
+    Only for when nobody is using the PC. Returns True if it worked.
+
+    Windows lets the program that sent the latest input change the
+    foreground window, so this first sends a mouse move of zero pixels:
+    input that no window reacts to. That also works when the foreground is
+    an invisible window, like the "Windows Input Experience" that took over
+    in a live test (2026-10-26). An Alt tap is the fallback.
+    """
     if user32.IsHungAppWindow(hwnd):
         return False  # not answering messages; activating it could block us
     if user32.IsIconic(hwnd):
         user32.ShowWindowAsync(hwnd, SW_RESTORE)
     if bring_to_front(hwnd):
         return True
-    # Sharing input with the foreground window's thread lets us move focus.
-    foreground = user32.GetForegroundWindow()
-    theirs = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
-    ours = kernel32.GetCurrentThreadId()
-    attached = bool(theirs) and theirs != ours and bool(user32.AttachThreadInput(ours, theirs, True))
-    try:
-        user32.SetForegroundWindow(hwnd)
-        if alt_tap and user32.GetForegroundWindow() != hwnd:
-            # Last resort: Windows also allows it right after a key press.
-            # Nobody is typing, so the Alt tap can't land in their work.
-            _send(_key(vk=VK["alt"]), _key(vk=VK["alt"], flags=KEYEVENTF_KEYUP), always=True)
+    _send(INPUT(type=INPUT_MOUSE, u=_INPUTUNION(mi=MOUSEINPUT(dwFlags=MOUSEEVENTF_MOVE))), always=True)
+    if _ask_for_front(hwnd):
+        return True
+    if alt_tap and user32.GetForegroundWindow() != hwnd:  # if it's ours, it's only still restoring
+        # Nobody is typing, so the Alt can't land in their work.
+        _send(_key(vk=VK["alt"]), _key(vk=VK["alt"], flags=KEYEVENTF_KEYUP), always=True)
+        return _ask_for_front(hwnd)
+    return False
+
+
+def _ask_for_front(hwnd: int, tries: int = 5) -> bool:
+    """SetForegroundWindow, retried briefly: SendInput only queues the input,
+    and the right to change the foreground comes once Windows handles it."""
+    for _ in range(tries):
+        time.sleep(0.05)
+        if user32.GetForegroundWindow() != hwnd:
             user32.SetForegroundWindow(hwnd)
-    finally:
-        if attached:
-            user32.AttachThreadInput(ours, theirs, False)
-    return user32.GetForegroundWindow() == hwnd and not user32.IsIconic(hwnd)
+        if user32.GetForegroundWindow() == hwnd and not user32.IsIconic(hwnd):  # restored, not just in front
+            return True
+    return False
 
 
 def user_idle_seconds() -> float:

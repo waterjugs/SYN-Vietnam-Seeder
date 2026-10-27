@@ -62,9 +62,8 @@ def test_units_screen_details(res):
     screen = ImageScreen(load("units", (w, h)))
     screen.refresh()
     assert screen.find("faction_nva", flow.FACTION_BADGE)
-    squad = screen.find("squad_join", flow.INFANTRY_COLUMN)
-    assert squad and 0.29 * w < squad[0] < 0.53 * w
-    assert screen.find("infantry_create", flow.INFANTRY_CREATE)
+    plus = screen.find("infantry_create", flow.INFANTRY_CREATE)
+    assert plus and 0.29 * w < plus[0] < 0.53 * w
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)

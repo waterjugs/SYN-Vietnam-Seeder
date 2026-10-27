@@ -110,6 +110,8 @@ HAPPY_PATH = {
     ("browser_search", "enter"): ({"browser_search"}, {"server_row"}),
     ("browser_refresh", "r"): (set(), set()),
     "browser_join": ({"server_row", "browser_join", "browser_refresh"}, {"select_force", "force_us", "force_nva", "admin_yes"}),
+    # Units also lists open squads ("squad_join" stands for their join
+    # arrows); the seeder must never click one.
     "force_us": ({"select_force", "force_us", "force_nva"}, {"switch_team", "squad_join", "infantry_create"}),
     "force_nva": ({"select_force", "force_us", "force_nva"}, {"switch_team", "faction_nva", "squad_join", "infantry_create"}),
     "squad_join": ({"switch_team", "faction_nva", "squad_join", "infantry_create"}, {"roles_confirm"}),
