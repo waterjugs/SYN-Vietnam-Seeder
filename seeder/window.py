@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import subprocess
 import sys
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
+from pathlib import Path
 from tkinter import ttk
 
 from . import __version__, crcon, instance, schedule
@@ -19,6 +22,25 @@ log = logging.getLogger(__name__)
 HOURS = [f"{h:02d}" for h in range(24)]
 MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]
 
+# Images drawn by tools/make_assets.py: 100% scaling in assets/, 200% in assets/2x.
+ASSETS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets"
+
+# "Dawn insertion": a jungle at first light.
+NIGHT = "#0C1823"        # top of the header sky; the title bar on Windows 11
+TREELINE = "#121C17"     # window body, same as the trees at the bottom of the header
+UNDERGROWTH = "#1D2A22"  # fields, list backgrounds
+EDGE = "#34463B"         # hairlines
+HAZE = "#ECE3D0"         # main text
+MIST = "#8E9C92"         # secondary text
+FIRST_LIGHT = "#F2A443"  # the action to take, and a server that still needs seeding
+PADDY = "#86C17A"        # a seeded server
+FLARE = "#F27A62"        # errors
+INK = "#1A140C"          # text on the amber button
+TRACK = "#26352C"        # empty part of the player meter
+
+PLAYERS_MAX = 100
+MARGIN = 24              # left and right of everything under the header, at 100% scaling
+
 
 def _start_seed_process() -> None:
     program, arguments = schedule.seed_command()
@@ -26,54 +48,324 @@ def _start_seed_process() -> None:
     subprocess.Popen([program, *arguments.split()], creationflags=flags, close_fds=True)
 
 
+def _make_dpi_aware() -> None:
+    """Draw at the screen's real resolution instead of being stretched (blurry) by Windows.
+
+    System-aware rather than per-monitor: Tk sizes its fonts once, at startup.
+    """
+    if os.name == "nt":
+        import ctypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+
+
+def _theme_title_bar(root: tk.Tk) -> None:
+    """Dark title bar on Windows 10 and 11; on 11 also coloured like the header's sky."""
+    if os.name != "nt":
+        return
+    import ctypes
+
+    def colorref(colour: str) -> int:
+        r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+        return r | g << 8 | b << 16
+
+    hwnd = ctypes.windll.user32.GetParent(root.winfo_id())  # type: ignore[attr-defined]
+    # DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR; older Windows ignores them.
+    for attribute, value in ((20, 1), (35, colorref(NIGHT)), (36, colorref(HAZE))):
+        value = ctypes.c_int(value)
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
+                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
+        except (AttributeError, OSError):
+            return
+
+
+def _resized(path: Path, factor: float) -> str:
+    """The PNG at ``path`` resized by ``factor``, as base64 PNG data for tk.PhotoImage."""
+    import cv2
+    import numpy as np
+
+    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    height, width = image.shape[:2]
+    size = (max(1, round(width * factor)), max(1, round(height * factor)))
+    method = cv2.INTER_AREA if factor < 1 else cv2.INTER_CUBIC
+    if image.shape[2] == 4:  # resize with premultiplied alpha so edges don't go dark
+        alpha = image[:, :, 3:].astype(np.float32) / 255
+        colour = cv2.resize(image[:, :, :3] * alpha, size, interpolation=method)
+        alpha = cv2.resize(alpha, size, interpolation=method)[:, :, None].clip(0, 1)
+        colour = np.divide(colour, alpha, out=np.zeros_like(colour), where=alpha > 0)
+        image = np.dstack([colour, alpha * 255]).round().clip(0, 255).astype(np.uint8)
+    else:
+        image = cv2.resize(image, size, interpolation=method)
+    return base64.b64encode(cv2.imencode(".png", image)[1].tobytes()).decode("ascii")
+
+
+def pick_font(root: tk.Misc, size: int, *candidates: tuple[str, str]) -> tuple:
+    """First installed (family, weight) of the candidates, as a Tk font tuple.
+
+    Windows 10/11 names come first; the others keep it close on other systems.
+    """
+    installed = set(tkfont.families(root))
+    for family, weight in candidates:
+        if family in installed:
+            return (family, size, weight)
+    return ("TkDefaultFont", size, candidates[-1][1])
+
+
 class SetupWindow:
     def __init__(self, config: Config):
         self.config = config
+        _make_dpi_aware()
         self.root = tk.Tk()
+        self.root.attributes("-alpha", 0.0)  # hidden until it's placed and themed, so nothing flashes
         self.root.title("SYN Vietnam Seeder")
         self.root.resizable(False, False)
-        frame = ttk.Frame(self.root, padding=16)
-        frame.grid()
+        self.root.configure(background=TREELINE)
+        # 1.0 at 100% Windows scaling, 1.5 at 150%...; fonts follow by themselves, pixels and images don't.
+        scale = self.root.winfo_fpixels("1i") / 96
+        self.scale = 1.0 if scale < 1.1 else 2.0 if abs(scale - 2) < 0.05 else scale
+        self._images: dict[str, tk.PhotoImage] = {}
+        self._fonts()
+        self._style()
+        self._icon()
+        px = self.px
 
-        ttk.Label(frame, text="SYN Vietnam Seeder", font=("Segoe UI", 14, "bold")).grid(columnspan=4, sticky="w")
-        self.server = ttk.Label(frame, text="Checking the server...")
-        self.server.grid(columnspan=4, sticky="w", pady=(2, 12))
+        header = self._image("header")
+        tk.Label(self.root, image=header, borderwidth=0, highlightthickness=0,
+                 background=TREELINE).grid(row=0, column=0, sticky="nw")
+        self.content_width = header.width() - 2 * px(MARGIN)  # so nothing below is wider than the picture
+        body = ttk.Frame(self.root, padding=(px(MARGIN), px(6), px(MARGIN), px(14)))
+        body.grid(row=1, column=0, sticky="nsew")
+        body.columnconfigure(0, minsize=px(144))
+        body.columnconfigure(1, weight=1)
 
+        # The server, and how far it is from seeded
+        ttk.Label(body, text=config.server_name, font=self.font_semibold).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        line = ttk.Frame(body)
+        line.grid(row=1, column=0, columnspan=2, sticky="we", pady=(px(2), px(6)))
+        line.columnconfigure(1, weight=1)
+        self.count = ttk.Label(line, text="0", font=self.font_count, padding=(0, 0, px(6), 0))
+        line.rowconfigure(0, minsize=self.count.winfo_reqheight())  # same height before the count arrives
+        self.server = ttk.Label(line, text="Checking the server...", style="Muted.TLabel")
+        self.server.grid(row=0, column=1, sticky="sw", pady=(0, px(4)))
+        self.need = ttk.Label(line, text="", font=self.font_semibold)
+        self.need.grid(row=0, column=2, sticky="se", pady=(0, px(4)))
+        self.meter = tk.Canvas(body, width=self.content_width, height=px(32), background=TREELINE,
+                               highlightthickness=0, borderwidth=0)
+        self.meter.grid(row=2, column=0, columnspan=2, sticky="w")
+        self._draw_meter(None)
+
+        # When and how to seed
         hour, minute = config.start_time.split(":")
-        ttk.Label(frame, text="Seed every day at").grid(row=2, column=0, sticky="w")
-        self.hour = ttk.Combobox(frame, values=HOURS, width=3, state="readonly")
+        ttk.Label(body, text="Seed every day at").grid(row=3, column=0, sticky="w", pady=(px(22), 0))
+        when = ttk.Frame(body)
+        when.grid(row=3, column=1, sticky="w", pady=(px(22), 0))
+        self.hour = ttk.Combobox(when, values=HOURS, width=3, state="readonly", style="Dawn.TCombobox",
+                                 font=self.font_body)
         self.hour.set(hour)
-        self.hour.grid(row=2, column=1)
-        self.minute = ttk.Combobox(frame, values=MINUTES, width=3, state="readonly")
+        self.hour.grid(row=0, column=0)
+        ttk.Label(when, text=":", font=self.font_semibold).grid(row=0, column=1, padx=px(6))
+        self.minute = ttk.Combobox(when, values=MINUTES, width=3, state="readonly", style="Dawn.TCombobox",
+                                   font=self.font_body)
         self.minute.set(minute if minute in MINUTES else "00")
-        self.minute.grid(row=2, column=2, sticky="w")
+        self.minute.grid(row=0, column=2)
 
-        ttk.Label(frame, text="Game launcher").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(body, text="Game launcher").grid(row=4, column=0, sticky="w", pady=(px(10), 0))
         self.launcher = tk.StringVar(value=config.launcher)
-        ttk.Radiobutton(frame, text="Steam", variable=self.launcher, value="steam").grid(row=3, column=1, pady=(8, 0))
-        ttk.Radiobutton(frame, text="Epic", variable=self.launcher, value="epic").grid(row=3, column=2, pady=(8, 0))
+        chips = ttk.Frame(body)
+        chips.grid(row=4, column=1, sticky="w", pady=(px(10), 0))
+        ttk.Radiobutton(chips, text="Steam", variable=self.launcher, value="steam", style="Chip.TRadiobutton",
+                        width=6).grid(row=0, column=0, padx=(0, px(6)))
+        ttk.Radiobutton(chips, text="Epic", variable=self.launcher, value="epic", style="Chip.TRadiobutton",
+                        width=6).grid(row=0, column=1)
 
         self.enabled = tk.BooleanVar(value=schedule.is_scheduled())
-        ttk.Checkbutton(frame, text="Seed automatically", variable=self.enabled).grid(
-            row=4, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(body, text="Seed automatically", variable=self.enabled, style="Dawn.TCheckbutton").grid(
+            row=5, column=1, sticky="w", pady=(px(12), 0))
 
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=5, columnspan=4, pady=(14, 6), sticky="we")
-        ttk.Button(buttons, text="Save", command=self.save).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(buttons, text="Seed now", command=self.seed_now).grid(row=0, column=1, padx=6)
-        ttk.Button(buttons, text="Stop seeding", command=self.stop).grid(row=0, column=2, padx=6)
+        # Actions
+        buttons = ttk.Frame(body)
+        buttons.grid(row=6, column=0, columnspan=2, sticky="we", pady=(px(24), 0))
+        buttons.columnconfigure(2, weight=1)
+        ttk.Button(buttons, text="Save", command=self.save, style="Primary.TButton").grid(
+            row=0, column=0, padx=(0, px(8)))
+        ttk.Button(buttons, text="Seed now", command=self.seed_now, style="Dawn.TButton").grid(row=0, column=1)
+        ttk.Button(buttons, text="Stop seeding", command=self.stop, style="Dawn.TButton").grid(
+            row=0, column=3, sticky="e")
 
-        self.status = ttk.Label(frame, text=self._schedule_text(), wraplength=320, foreground="#555")
-        self.status.grid(row=6, columnspan=4, sticky="w")
-        footer = ttk.Frame(frame)
-        footer.grid(row=7, columnspan=4, sticky="we", pady=(10, 0))
-        ttk.Label(footer, text=f"v{__version__}  ·  Ctrl+Alt+End stops a run",
-                  foreground="#888").grid(row=0, column=0, sticky="w")
-        log_link = ttk.Label(footer, text="Open log", foreground="#2a6ebb", cursor="hand2")
-        log_link.grid(row=1, column=0, sticky="w")
+        self.status = ttk.Label(body, text="Two\nlines", wraplength=self.content_width - 4, style="Muted.TLabel",
+                                justify="left")  # ttk puts 2 px either side of the text
+        self.status.grid(row=7, column=0, columnspan=2, sticky="nw", pady=(px(12), 0))
+        body.rowconfigure(7, minsize=px(12) + self.status.winfo_reqheight())  # keeps two lines, so nothing jumps
+        self.status.config(text=self._schedule_text())
+
+        tk.Frame(body, height=max(1, px(1)), background=EDGE).grid(
+            row=8, column=0, columnspan=2, sticky="we", pady=(px(18), px(10)))
+        footer = ttk.Frame(body)
+        footer.grid(row=9, column=0, columnspan=2, sticky="we")
+        footer.columnconfigure(1, weight=1)
+        ttk.Label(footer, text=f"v{__version__}", style="Small.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(footer, text="Ctrl+Alt+End stops a run", style="Small.TLabel").grid(
+            row=0, column=1, sticky="w", padx=(px(16), 0))
+        log_link = ttk.Label(footer, text="Open log", style="Link.TLabel", cursor="hand2")
+        log_link.grid(row=0, column=2, sticky="e")
         log_link.bind("<Button-1>", lambda _: self.open_log())
+        log_link.bind("<Enter>", lambda _: log_link.configure(style="LinkHover.TLabel"))
+        log_link.bind("<Leave>", lambda _: log_link.configure(style="Link.TLabel"))
 
+        self._show()
         threading.Thread(target=self._load_server, daemon=True).start()
+
+    # The look
+
+    def px(self, n: float) -> int:
+        """Pixels at the screen's scaling for ``n`` pixels at 100%."""
+        return round(n * self.scale)
+
+    def _image(self, name: str) -> tk.PhotoImage:
+        if name not in self._images:
+            if self.scale == 1:
+                image = tk.PhotoImage(master=self.root, file=str(ASSETS / f"{name}.png"))
+            elif self.scale == 2:
+                image = tk.PhotoImage(master=self.root, file=str(ASSETS / "2x" / f"{name}.png"))
+            else:
+                image = tk.PhotoImage(master=self.root, data=_resized(ASSETS / "2x" / f"{name}.png", self.scale / 2))
+            self._images[name] = image
+        return self._images[name]
+
+    def _icon(self) -> None:
+        try:  # every size Windows may want, from the .ico
+            self.root.iconbitmap(default=str(ASSETS / "synseeder.ico"))
+        except tk.TclError:  # not Windows
+            self.root.iconphoto(True, *(tk.PhotoImage(master=self.root, file=str(ASSETS / f"icon-{s}.png"))
+                                        for s in (48, 32, 16)))
+
+    def _show(self) -> None:
+        """Centres the window, themes its title bar, then makes it visible."""
+        self.root.update_idletasks()
+        width, height = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
+        x = max(0, (self.root.winfo_screenwidth() - width) // 2)
+        y = max(0, (self.root.winfo_screenheight() - height) // 3)
+        self.root.geometry(f"+{x}+{y}")
+        _theme_title_bar(self.root)
+        self.root.attributes("-alpha", 1.0)
+
+    def _fonts(self) -> None:
+        ui = (("Segoe UI", "normal"), ("Inter", "normal"), ("DejaVu Sans", "normal"))
+        self.font_body = pick_font(self.root, 10, *ui)
+        self.font_small = pick_font(self.root, 9, *ui)
+        self.font_semibold = pick_font(self.root, 10, ("Segoe UI Semibold", "normal"), ("Inter", "bold"),
+                                       ("DejaVu Sans", "bold"))
+        self.font_count = pick_font(self.root, 22, ("Bahnschrift SemiBold", "normal"), ("Bahnschrift", "bold"),
+                                    ("Inter Display", "bold"), ("DejaVu Sans", "bold"))
+        self.font_link = self.font_small + ("underline",)
+
+    def _style(self) -> None:
+        style = ttk.Style(self.root)
+        style.theme_use("clam")  # the native Windows theme ignores colours
+        img, px = self._image, self.px
+        style.configure(".", background=TREELINE, foreground=HAZE, font=self.font_body,
+                        bordercolor=EDGE, lightcolor=TREELINE, darkcolor=TREELINE, troughcolor=UNDERGROWTH,
+                        focuscolor=EDGE, selectbackground=FIRST_LIGHT, selectforeground=INK)
+        style.configure("TLabel", background=TREELINE, foreground=HAZE)
+        style.configure("Muted.TLabel", foreground=MIST)
+        style.configure("Small.TLabel", foreground=MIST, font=self.font_small)
+        style.configure("Link.TLabel", foreground=FIRST_LIGHT, font=self.font_link)
+        style.configure("LinkHover.TLabel", foreground="#F7C27A", font=self.font_link)
+
+        # Buttons: 9-slice images, so the corners stay round at any width
+        for name, prefix, fg in (("Primary", "btn-primary", INK), ("Dawn", "btn", HAZE)):
+            style.element_create(f"{name}.border", "image", img(prefix),
+                                 ("disabled", img(f"{prefix}-disabled")), ("pressed", img(f"{prefix}-pressed")),
+                                 ("active", img(f"{prefix}-hover")), ("focus", img(f"{prefix}-focus")),
+                                 border=px(8), padding=0, sticky="nsew")
+            style.layout(f"{name}.TButton", [(f"{name}.border", {"sticky": "nsew", "children": [
+                ("Button.padding", {"sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]})]})])
+            style.configure(f"{name}.TButton", foreground=fg, font=self.font_semibold, padding=(px(18), px(6)),
+                            anchor="center", width=0)
+            style.map(f"{name}.TButton", foreground=[("disabled", MIST)])
+
+        # Steam / Epic as two chips
+        style.element_create("Chip.border", "image", img("chip"), ("selected", img("chip-on")),
+                             ("active", img("chip-hover")), border=px(6), padding=0, sticky="nsew")
+        style.layout("Chip.TRadiobutton", [("Chip.border", {"sticky": "nsew", "children": [
+            ("Radiobutton.padding", {"sticky": "nsew", "children": [("Radiobutton.label", {"sticky": "nsew"})]})]})])
+        style.configure("Chip.TRadiobutton", foreground=MIST, padding=(px(12), px(4)), anchor="center")
+        style.map("Chip.TRadiobutton", foreground=[("selected", HAZE), ("active", HAZE)])
+
+        # Seed automatically
+        style.element_create("Dawn.Checkbutton.indicator", "image", img("check-off"),
+                             ("selected", "active", img("check-on-hover")), ("selected", img("check-on")),
+                             ("active", img("check-off-hover")), sticky="w")
+        style.layout("Dawn.TCheckbutton", [("Checkbutton.padding", {"sticky": "nsew", "children": [
+            ("Dawn.Checkbutton.indicator", {"side": "left", "sticky": ""}),
+            ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
+                ("Checkbutton.label", {"sticky": "nsew"})]})]})])
+        style.configure("Dawn.TCheckbutton", padding=(0, px(2)))
+        style.map("Dawn.TCheckbutton", background=[("active", TREELINE)], foreground=[("active", HAZE)])
+
+        # Hour and minute pickers, and their drop-down lists
+        style.element_create("Dawn.Combobox.field", "image", img("field"), ("focus", img("field-focus")),
+                             ("active", img("field-hover")), ("pressed", img("field-hover")),
+                             border=px(6), padding=0, sticky="nsew")
+        style.element_create("Dawn.Combobox.downarrow", "image", img("chevron"), sticky="")
+        style.layout("Dawn.TCombobox", [("Dawn.Combobox.field", {"sticky": "nsew", "children": [
+            ("Dawn.Combobox.downarrow", {"side": "right", "sticky": "ns"}),
+            ("Combobox.padding", {"expand": "1", "sticky": "nsew", "children": [
+                ("Combobox.textarea", {"sticky": "nsew"})]})]})])
+        style.configure("Dawn.TCombobox", foreground=HAZE, padding=(px(10), px(4), 0, px(4)),
+                        selectbackground=UNDERGROWTH, selectforeground=HAZE, fieldbackground=UNDERGROWTH)
+        style.map("Dawn.TCombobox", foreground=[("readonly", HAZE)],
+                  selectbackground=[("readonly", UNDERGROWTH)], selectforeground=[("readonly", HAZE)])
+        self.root.option_add("*TCombobox*Listbox.background", UNDERGROWTH)
+        self.root.option_add("*TCombobox*Listbox.foreground", HAZE)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", FIRST_LIGHT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", INK)
+        self.root.option_add("*TCombobox*Listbox.font", self.font_body)
+        self.root.option_add("*TCombobox*Listbox.borderWidth", px(4))  # flat, so it reads as inner padding
+        self.root.option_add("*TCombobox*Listbox.highlightThickness", 0)
+        self.root.option_add("*TCombobox*Listbox.activeStyle", "none")
+        style.configure("ComboboxPopdownFrame", background=UNDERGROWTH, bordercolor=EDGE, relief="solid",
+                        borderwidth=1)
+        style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=UNDERGROWTH, arrowcolor=MIST,
+                        bordercolor=UNDERGROWTH, lightcolor=EDGE, darkcolor=EDGE, gripcount=0, arrowsize=px(11))
+        style.map("Vertical.TScrollbar", background=[("active", "#4A5E50")])
+
+    def _draw_meter(self, count: int | None) -> None:
+        """Thin bar of players out of 100, with a tick where the server counts as seeded."""
+        c, px = self.meter, self.px
+        c.delete("all")
+        width, y, thick = self.content_width, px(7), px(6)
+        left, right = thick / 2, width - thick / 2
+        c.create_line(left, y, right, y, fill=TRACK, width=thick, capstyle="round")
+        if count:
+            seeded = count >= self.config.seeded_threshold
+            x = left + (right - left) * min(count, PLAYERS_MAX) / PLAYERS_MAX
+            c.create_line(left, y, x, y, fill=PADDY if seeded else FIRST_LIGHT, width=thick, capstyle="round")
+        tick = left + (right - left) * self.config.seeded_threshold / PLAYERS_MAX
+        c.create_line(tick, px(1), tick, px(13), fill=HAZE, width=px(2))
+        c.create_text(tick, px(15), text=f"Seeded at {self.config.seeded_threshold}", anchor="n", fill=MIST,
+                      font=self.font_small)
+
+    def _show_server(self, count: int | None) -> None:
+        if count is None:
+            self.count.grid_remove()
+            self.server.config(text="Couldn't reach the server stats.")
+            self.need.config(text="")
+        else:
+            missing = self.config.seeded_threshold - count
+            self.count.config(text=str(count))
+            self.count.grid(row=0, column=0, sticky="sw")
+            self.server.config(text=f"of {PLAYERS_MAX} players right now")
+            self.need.config(text=f"Needs {missing} more" if missing > 0 else "Seeded",
+                             foreground=FIRST_LIGHT if missing > 0 else PADDY)
+        self._draw_meter(count)
+
+    # What the window does
 
     def _schedule_text(self) -> str:
         if schedule.is_scheduled():
@@ -83,9 +375,8 @@ class SetupWindow:
 
     def _load_server(self) -> None:
         status = crcon.fetch(self.config.crcon_url)
-        text = (f"Syndicate has {status.player_count}/100 players right now "
-                f"(seeded at {self.config.seeded_threshold})." if status else "Couldn't reach the server stats.")
-        self.root.after(0, lambda: self.server.config(text=text))
+        count = status.player_count if status else None
+        self.root.after(0, lambda: self._show_server(count))
 
     def save(self) -> None:
         self.config.start_time = f"{self.hour.get()}:{self.minute.get()}"
@@ -98,9 +389,9 @@ class SetupWindow:
                 schedule.unschedule()
         except (OSError, RuntimeError) as exc:
             log.exception("Scheduling failed")
-            self.status.config(text=f"Couldn't set up the schedule: {exc}", foreground="#b00020")
+            self.status.config(text=f"Couldn't set up the schedule: {exc}", foreground=FLARE)
             return
-        self.status.config(text="Saved. " + self._schedule_text(), foreground="#555")
+        self.status.config(text="Saved. " + self._schedule_text(), foreground=MIST)
 
     def seed_now(self) -> None:
         if instance.seeding_processes():

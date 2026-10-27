@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
-      - run: pyinstaller --onefile --noconsole --name SynSeeder --add-data "templates;templates" run_seeder.py
+      - run: pyinstaller --noconfirm SynSeeder.spec
       - uses: actions/upload-artifact@v4
         with:
           name: SynSeeder
