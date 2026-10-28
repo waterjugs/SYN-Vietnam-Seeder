@@ -124,8 +124,20 @@ def test_user_templates_override_bundled(tmp_path):
     cv2.imwrite(str(user / "menu_enlist.png"), img[:20, :50])
     templates = load_templates(bundled, user)
     assert len(templates["menu_enlist"]) == 1
-    assert templates["menu_enlist"][0].shape == (20, 50)
+    assert templates["menu_enlist"][0][0].shape == (20, 50)
     assert len(templates["browser_join"]) == 1
+
+
+def test_variants_named_after_a_height_are_scaled_from_it(tmp_path):
+    img = np.full((30, 100), 200, np.uint8)
+    for name in ("server_row.png", "server_row.1080p.png", "roles_confirm.title.png"):
+        cv2.imwrite(str(tmp_path / name), img)
+    templates = load_templates(tmp_path)
+    assert sorted(height for _, height in templates["server_row"]) == [1080, 1440]
+    assert [height for _, height in templates["roles_confirm"]] == [1440]
+    # A 1080p crop is shrunk by 720/1080, a 1440p one by 720/1440.
+    widths = sorted({needle.shape[1] for needle in Vision(templates).templates["server_row"]})
+    assert widths == [48, 50, 52, 63, 67, 70]
 
 
 def test_no_matches_on_noise():
