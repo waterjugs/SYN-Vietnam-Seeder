@@ -178,9 +178,9 @@ class SetupWindow:
         self.count = ttk.Label(line, text="0", font=self.font_count, padding=(0, 0, px(6), 0))
         line.rowconfigure(0, minsize=self.count.winfo_reqheight())  # same height before the count arrives
         self.server = ttk.Label(line, text="Checking the server...", style="Muted.TLabel")
-        self.server.grid(row=0, column=1, sticky="sw", pady=(0, px(4)))
+        self.server.grid(row=0, column=1, sticky="sw", pady=(0, self._baseline_lift(self.font_body)))
         self.need = ttk.Label(line, text="", font=self.font_semibold)
-        self.need.grid(row=0, column=2, sticky="se", pady=(0, px(4)))
+        self.need.grid(row=0, column=2, sticky="se", pady=(0, self._baseline_lift(self.font_semibold)))
         self.meter = tk.Canvas(body, width=self.content_width, height=px(32), background=TWILIGHT,
                                highlightthickness=0, borderwidth=0)
         self.meter.grid(row=2, column=0, sticky="w")
@@ -304,9 +304,14 @@ class SetupWindow:
         self.font_small = pick_font(self.root, 9, *ui)
         self.font_semibold = pick_font(self.root, 10, ("Segoe UI Semibold", "normal"), ("Inter", "bold"),
                                        ("DejaVu Sans", "bold"))
-        self.font_count = pick_font(self.root, 22, ("Bahnschrift SemiBold", "normal"), ("Bahnschrift", "bold"),
-                                    ("Inter Display", "bold"), ("DejaVu Sans", "bold"))
+        self.font_count = pick_font(self.root, 14, ("Segoe UI", "bold"), ("Inter", "bold"), ("DejaVu Sans", "bold"))
         self.font_link = self.font_small + ("underline",)
+
+    def _baseline_lift(self, font: tuple) -> int:
+        """How far to raise text in this font, hung from the count line's bottom, to sit on the count's baseline."""
+        def descent(f: tuple) -> int:
+            return tkfont.Font(root=self.root, font=f).metrics("descent")
+        return max(0, descent(self.font_count) - descent(font))
 
     def _style(self) -> None:
         style = ttk.Style(self.root)
