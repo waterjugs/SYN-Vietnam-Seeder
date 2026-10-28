@@ -54,6 +54,11 @@ def test_opens_at_any_scaling(calls, monkeypatch, tmp_path, dpi):
     w.root.destroy()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the bundled font is only loaded on Windows")
+def test_writes_in_the_bundled_inter(win):
+    assert win.font_body[0] == win.font_count[0] == "Inter"
+
+
 def test_shows_settings(win):
     assert (win.hour.get(), win.minute.get(), win.launcher.get()) == ("06", "35", "epic")
     assert win.enabled.get()

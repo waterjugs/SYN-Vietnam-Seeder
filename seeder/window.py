@@ -24,6 +24,7 @@ MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]
 
 # Images drawn by tools/make_assets.py: 100% scaling in assets/, 200% in assets/2x.
 ASSETS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets"
+FONT_FILES = ("Inter-Regular.ttf", "Inter-Bold.ttf")  # in assets/fonts, under the SIL Open Font License
 
 # Night sky warming to dusk, carried down through the window, with amber for first light.
 NIGHT = "#0C1823"        # top of the header's sky; the title bar on Windows 11
@@ -60,6 +61,27 @@ def _make_dpi_aware() -> None:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)  # type: ignore[attr-defined]
         except (AttributeError, OSError):
             pass
+
+
+def _load_fonts() -> None:
+    """Let this process use the Inter that ships in assets/fonts, without installing it (Windows).
+
+    Windows doesn't come with Inter. If loading fails, pick_font falls back to Segoe UI.
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        gdi32 = ctypes.WinDLL("gdi32")  # own copy, own prototype
+        gdi32.AddFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+        gdi32.AddFontResourceExW.restype = ctypes.c_int
+        for name in FONT_FILES:
+            if not gdi32.AddFontResourceExW(str(ASSETS / "fonts" / name), 0x10, None):  # FR_PRIVATE
+                log.debug("Couldn't load %s", name)
+    except (AttributeError, OSError, ctypes.ArgumentError):
+        log.debug("Couldn't load the fonts", exc_info=True)
 
 
 def _dress_for_windows(root: tk.Tk) -> None:
@@ -135,7 +157,7 @@ def _resized(path: Path, factor: float) -> str:
 def pick_font(root: tk.Misc, size: int, *candidates: tuple[str, str]) -> tuple:
     """First installed (family, weight) of the candidates, as a Tk font tuple.
 
-    Windows 10/11 names come first; the others keep it close on other systems.
+    The bundled Inter comes first, then what Windows 10/11 has; the others keep it close elsewhere.
     """
     installed = set(tkfont.families(root))
     for family, weight in candidates:
@@ -148,6 +170,7 @@ class SetupWindow:
     def __init__(self, config: Config):
         self.config = config
         _make_dpi_aware()
+        _load_fonts()
         self.root = tk.Tk()
         self.root.attributes("-alpha", 0.0)  # hidden until it's placed and themed, so nothing flashes
         self.root.title("SYN Vietnam Seeder")
@@ -299,12 +322,12 @@ class SetupWindow:
         self.root.attributes("-alpha", 1.0)
 
     def _fonts(self) -> None:
-        ui = (("Segoe UI", "normal"), ("Inter", "normal"), ("DejaVu Sans", "normal"))
+        ui = (("Inter", "normal"), ("Segoe UI", "normal"), ("DejaVu Sans", "normal"))
+        bold = (("Inter", "bold"), ("Segoe UI Semibold", "normal"), ("DejaVu Sans", "bold"))
         self.font_body = pick_font(self.root, 10, *ui)
         self.font_small = pick_font(self.root, 9, *ui)
-        self.font_semibold = pick_font(self.root, 10, ("Segoe UI Semibold", "normal"), ("Inter", "bold"),
-                                       ("DejaVu Sans", "bold"))
-        self.font_count = pick_font(self.root, 14, ("Segoe UI", "bold"), ("Inter", "bold"), ("DejaVu Sans", "bold"))
+        self.font_semibold = pick_font(self.root, 10, *bold)
+        self.font_count = pick_font(self.root, 14, *bold)
         self.font_link = self.font_small + ("underline",)
 
     def _baseline_lift(self, font: tuple) -> int:
