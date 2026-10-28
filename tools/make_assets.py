@@ -24,11 +24,11 @@ FONTS = HERE / "fonts" / "barlow-condensed"
 
 # Keep in step with seeder/window.py.
 NIGHT = "#0C1823"
-TREELINE = "#121C17"
-UNDERGROWTH = "#1D2A22"
-EDGE = "#34463B"
+TWILIGHT = "#151A27"
+SLATE = "#1F2335"
+EDGE = "#363A52"
 HAZE = "#ECE3D0"
-MIST = "#8E9C92"
+MIST = "#9C98B0"
 FIRST_LIGHT = "#F2A443"
 PADDY = "#86C17A"
 
@@ -186,9 +186,9 @@ def check_image(on: bool, hover: bool, scale: int) -> Image.Image:
             d.ellipse([x - r, y - r, x + r, y + r], fill=rgba("#1A140C"))
     else:
         d.rounded_rectangle([S, S, (box - 1) * S - 1, (box - 1) * S - 1], radius=3 * S,
-                            fill=rgba("#8E9C92" if hover else "#5C7064"))
+                            fill=rgba(MIST if hover else "#666A85"))
         d.rounded_rectangle([int(2.5 * S), int(2.5 * S), int((box - 2.5) * S) - 1, int((box - 2.5) * S) - 1],
-                            radius=2 * S, fill=rgba(UNDERGROWTH))
+                            radius=2 * S, fill=rgba(SLATE))
     return img.resize((box * scale, box * scale), Image.LANCZOS)
 
 
@@ -217,21 +217,21 @@ def make_widgets(out: Path, scale: int) -> None:
         "btn-primary-focus": box(32, 32, 5, FIRST_LIGHT, border="#FFE3B3", bw=1.5),
         "btn-primary-disabled": box(32, 32, 5, "#5A4A33"),
         # Seed now, Stop seeding
-        "btn": box(32, 32, 5, UNDERGROWTH, border=EDGE),
-        "btn-hover": box(32, 32, 5, "#26362C", border="#526A5A"),
-        "btn-pressed": box(32, 32, 5, "#16211B", border="#526A5A"),
-        "btn-focus": box(32, 32, 5, UNDERGROWTH, border="#B88A4A", bw=1.5),
-        "btn-disabled": box(32, 32, 5, TREELINE, border="#26342C"),
+        "btn": box(32, 32, 5, SLATE, border=EDGE),
+        "btn-hover": box(32, 32, 5, "#292E45", border="#555B78"),
+        "btn-pressed": box(32, 32, 5, "#121624", border="#555B78"),
+        "btn-focus": box(32, 32, 5, SLATE, border="#B88A4A", bw=1.5),
+        "btn-disabled": box(32, 32, 5, TWILIGHT, border="#262A3B"),
         # Steam / Epic
-        "chip": box(32, 30, 4, TREELINE, border=EDGE),
-        "chip-hover": box(32, 30, 4, "#1F2C24", border="#526A5A"),
+        "chip": box(32, 30, 4, TWILIGHT, border=EDGE),
+        "chip-hover": box(32, 30, 4, "#1E2234", border="#555B78"),
         "chip-on": box(32, 30, 4, "#3A2F1D", border=FIRST_LIGHT, bw=1.5),
-        "chip-focus": box(32, 30, 4, TREELINE, border="#B88A4A", bw=1.5),
+        "chip-focus": box(32, 30, 4, TWILIGHT, border="#B88A4A", bw=1.5),
         "chip-on-focus": box(32, 30, 4, "#3A2F1D", border="#FFE3B3", bw=1.5),
         # time pickers
-        "field": box(32, 30, 4, UNDERGROWTH, border=EDGE),
-        "field-hover": box(32, 30, 4, "#22312A", border="#526A5A"),
-        "field-focus": box(32, 30, 4, UNDERGROWTH, border="#B88A4A", bw=1.5),
+        "field": box(32, 30, 4, SLATE, border=EDGE),
+        "field-hover": box(32, 30, 4, "#262A3F", border="#555B78"),
+        "field-focus": box(32, 30, 4, SLATE, border="#B88A4A", bw=1.5),
         "chevron": chevron(HAZE, scale),
         # Seed automatically
         "check-off": check_image(False, False, scale),
@@ -254,7 +254,7 @@ def icon_image(size: int) -> Image.Image:
     u = N / 64 * 0.98
     tile = dusk(N, N, 0.18)
     ox, oy = N / 2 - 31.5 * u, N / 2 - 33.5 * u  # the seedling spans x 8..55, y 11..56 of its box
-    draw_sprout(ImageDraw.Draw(tile), ox, oy, u, bold=size <= 32, outline=rgba("#0A120E") if size <= 32 else None)
+    draw_sprout(ImageDraw.Draw(tile), ox, oy, u, bold=size <= 32, outline=rgba("#0A0E18") if size <= 32 else None)
     mask = Image.new("L", (N, N), 0)
     inset = 0 if size <= 32 else N * 0.03
     ImageDraw.Draw(mask).rounded_rectangle([inset, inset, N - 1 - inset, N - 1 - inset],
