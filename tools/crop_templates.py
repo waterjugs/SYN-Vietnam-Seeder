@@ -3,7 +3,8 @@
     python tools/crop_templates.py <folder of screenshots>
 
 The folder needs the screenshots named below (Steam's F12 saves them under
-Steam/userdata/<id>/760/remote/3079210/screenshots). After a game patch,
+Steam/userdata/<id>/760/remote/3079210/screenshots), plus 1920x1080 ones in
+a 1080p subfolder for the text templates' 1080p crops. After a game patch,
 retake the affected screen, adjust its box here if the layout moved, rerun,
 then run the tests.
 """
@@ -41,18 +42,27 @@ BOXES = {
     "create_unit_button": ("create_unit", 1770, 1025, 2150, 1109),
 }
 
+# The game draws small text differently at 1080p, so text templates also get
+# a crop from 1920x1080 screenshots (saved as name.1080p.png).
+BOXES_1080P = {
+    "server_row": ("browser", 205, 216, 526, 238),
+    "create_unit": ("create_unit", 450, 306, 671, 354),
+}
+
 
 def main(folder: Path) -> None:
     out = Path(__file__).resolve().parent.parent / "templates"
-    for name, (shot, x0, y0, x1, y1) in BOXES.items():
-        image = cv2.imread(str(folder / f"{shot}.jpg"))
-        if image is None:
-            print(f"skip {name}: no {shot}.jpg")
-            continue
-        if image.shape[:2] != (1440, 2560):
-            sys.exit(f"{shot}.jpg must be 2560x1440")
-        cv2.imwrite(str(out / f"{name}.png"), image[y0:y1, x0:x1])
-        print(f"wrote {name}.png")
+    for boxes, subfolder, size, suffix in ((BOXES, "", (2560, 1440), ""), (BOXES_1080P, "1080p", (1920, 1080), ".1080p")):
+        for name, (shot, x0, y0, x1, y1) in boxes.items():
+            source = Path(subfolder, f"{shot}.jpg")
+            image = cv2.imread(str(folder / source))
+            if image is None:
+                print(f"skip {name}{suffix}: no {source}")
+                continue
+            if image.shape[1::-1] != size:
+                sys.exit(f"{source} must be {size[0]}x{size[1]}")
+            cv2.imwrite(str(out / f"{name}{suffix}.png"), image[y0:y1, x0:x1])
+            print(f"wrote {name}{suffix}.png")
 
 
 if __name__ == "__main__":

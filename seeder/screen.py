@@ -36,11 +36,12 @@ MATCH_THRESHOLD = 0.88
 THRESHOLDS = {
     # JOIN sits on row backgrounds that vary; real ones score 0.87+, lookalikes < 0.80.
     "browser_join": 0.84,
-    # Text drawn at a screen height we have no crop for scores lower: 0.85
-    # (server name) and 0.84 (CREATE A UNIT) at 1080p against the 1440p crops.
+    # The game draws small text differently at each screen height, and these
+    # two have crops from 1440p and 1080p only: either crop scores 0.83-0.88 on
+    # text drawn at the other height, so other resolutions should land close.
     # The closest lookalikes are the server name in the Select Force footer
-    # (0.87, but Select Force is checked first and has no JOIN to click) and
-    # 0.52 for CREATE A UNIT.
+    # (0.87-0.97, but Select Force is checked first and has no JOIN to click)
+    # and 0.52 for CREATE A UNIT.
     "server_row": 0.84,
     "create_unit": 0.80,
 }

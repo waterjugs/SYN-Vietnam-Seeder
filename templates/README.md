@@ -6,7 +6,10 @@ v1.7 (October 2026) by `tools/crop_templates.py`, which holds the exact
 boxes. Frames and templates are both shrunk to 720px high and lightly
 blurred before matching, so the same set works from 720p to 1440p and up
 (tests/test_matching.py checks 720p, 1080p and 1440p against real
-screenshots).
+screenshots, and the screens in tests/screens/1080p were captured natively
+at 1920x1080). The game draws small text a little differently at each
+resolution, so the two text templates also have a 1080p crop,
+`server_row.1080p.png` and `create_unit.1080p.png`.
 
 | File | Screen it identifies / what gets clicked |
 | --- | --- |
@@ -27,6 +30,8 @@ screenshots).
 | `deploy_button.png` | Deployment screen; F deploys |
 | `game_menu_leave.png` | Esc menu open by accident; Esc closes it |
 
-Extra variants of a template go in as `name.<anything>.png`. Players can
+Extra variants of a template go in as `name.<anything>.png`. One named
+after a screen height, like `name.1080p.png`, is taken as cut from a
+screenshot that tall; any other is taken as cut at 1440p. Players can
 override any of these without a new build by dropping a file with the same
 name into `%APPDATA%\SynSeeder\templates`.
