@@ -5,7 +5,10 @@ frame is shrunk to a 720px-high working copy and lightly blurred, and the
 templates are prepared the same way, so one set works at any resolution
 (the game scales its UI with screen height). A file named ``name.png`` or
 ``name.<variant>.png`` belongs to the template ``name``; any variant
-matching counts as a hit.
+matching counts as a hit. A variant named after a screen height, such as
+``server_row.1080p.png``, was cut from a screenshot that tall: the game
+draws small text a little differently at each resolution, so text
+templates carry a crop from each common one.
 
 Regions are (left, top, right, bottom) as fractions of the screen.
 """
@@ -13,6 +16,7 @@ Regions are (left, top, right, bottom) as fractions of the screen.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -25,15 +29,26 @@ from .config import app_dir
 
 log = logging.getLogger(__name__)
 
-TEMPLATE_HEIGHT = 1440  # screen height the templates were cropped at
+TEMPLATE_HEIGHT = 1440  # screen height templates are cut at, unless their name says otherwise
 WORK_HEIGHT = 720
 BLUR = (3, 3)
 MATCH_THRESHOLD = 0.88
-# JOIN sits on row backgrounds that vary; real ones score 0.87+, lookalikes < 0.80.
-THRESHOLDS = {"browser_join": 0.84}
+THRESHOLDS = {
+    # JOIN sits on row backgrounds that vary; real ones score 0.87+, lookalikes < 0.80.
+    "browser_join": 0.84,
+    # Text drawn at a screen height we have no crop for scores lower: 0.85
+    # (server name) and 0.84 (CREATE A UNIT) at 1080p against the 1440p crops.
+    # The closest lookalikes are the server name in the Select Force footer
+    # (0.87, but Select Force is checked first and has no JOIN to click) and
+    # 0.52 for CREATE A UNIT.
+    "server_row": 0.84,
+    "create_unit": 0.80,
+}
 SCALES = (0.95, 1.0, 1.05)
 
 Region = tuple[float, float, float, float]
+Template = tuple[np.ndarray, int]  # image, and the screen height it was cut at
+HEIGHT_VARIANT = re.compile(r"(\d{3,4})p")
 
 REQUIRED_TEMPLATES = {
     "admin_yes", "game_menu_leave", "deploy_button", "roles_confirm", "switch_team", "server_row",
@@ -47,15 +62,16 @@ def bundled_templates_dir() -> Path:
     return base / "templates"
 
 
-def load_templates(*dirs: Path) -> dict[str, list[np.ndarray]]:
+def load_templates(*dirs: Path) -> dict[str, list[Template]]:
     """Later dirs override earlier ones, so players can drop in fixes."""
-    templates: dict[str, list[np.ndarray]] = {}
+    templates: dict[str, list[Template]] = {}
     for directory in dirs:
         if not directory.is_dir():
             continue
         overridden: set[str] = set()
         for file in sorted(directory.glob("*.png")):
-            name = file.stem.split(".")[0]
+            name, *variant = file.stem.split(".")
+            cut_at = HEIGHT_VARIANT.fullmatch(variant[-1]) if variant else None
             # imdecode copes with non-ASCII paths (e.g. accented user names); imread doesn't
             image = cv2.imdecode(np.fromfile(str(file), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
             if image is None:
@@ -63,7 +79,7 @@ def load_templates(*dirs: Path) -> dict[str, list[np.ndarray]]:
             if name not in overridden:
                 templates[name] = []
                 overridden.add(name)
-            templates[name].append(image)
+            templates[name].append((image, int(cut_at.group(1)) if cut_at else TEMPLATE_HEIGHT))
     return templates
 
 
@@ -123,10 +139,9 @@ class Vision:
     """Template lookups against the latest frame. No capture or input, so it
     also runs on saved screenshots (see tests)."""
 
-    def __init__(self, raw_templates: dict[str, list[np.ndarray]]) -> None:
-        scale = WORK_HEIGHT / TEMPLATE_HEIGHT
+    def __init__(self, raw_templates: dict[str, list[Template]]) -> None:
         self.templates = {
-            name: [prepare_template(img, scale * s) for img in images for s in SCALES]
+            name: [prepare_template(img, WORK_HEIGHT / cut_at * s) for img, cut_at in images for s in SCALES]
             for name, images in raw_templates.items()
         }
         self._frame: np.ndarray | None = None
