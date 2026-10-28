@@ -45,7 +45,7 @@ BOXES = {
 # The game draws small text differently at 1080p, so text templates also get
 # a crop from 1920x1080 screenshots (saved as name.1080p.png).
 BOXES_1080P = {
-    "server_row": ("browser", 205, 216, 526, 238),
+    "server_row": ("search", 205, 216, 526, 238),
     "create_unit": ("create_unit", 450, 306, 671, 354),
 }
 
