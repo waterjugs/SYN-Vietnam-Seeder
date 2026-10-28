@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from seeder import flow
-from seeder.screen import Vision, bundled_templates_dir, load_templates, match_all
+from seeder.screen import Vision, bundled_templates_dir, load_templates, match_all, prepare_frame
 
 SCREENS = Path(__file__).parent / "screens"
 
@@ -34,13 +34,13 @@ EXPECTED = {
 }
 RESOLUTIONS = {"1080p": (1920, 1080), "720p": (1280, 720), "1440p": (2560, 1440)}
 
-# Captured natively at 1920x1080 on 2026-10-27 (live run on game build v1.7).
-# The game draws small text differently from 1440p here, which the resized
-# screenshots above can't show: the 1440p server name and CREATE A UNIT crops
-# alone scored 0.85 and 0.84.
+# Captured natively at 1920x1080 on 2026-10-27 (live run on game build v1.7),
+# named like the screenshots above. The game draws small text differently from
+# 1440p here, which the resized screenshots above can't show: the 1440p server
+# name and CREATE A UNIT crops alone scored 0.85 and 0.84.
 EXPECTED_1080P = {
     "menu": "menu_enlist",
-    "browser": "server_row",
+    "search": "server_row",
     "select_force": "select_force",
     "units": "switch_team",
     "create_unit": "create_unit",
@@ -79,13 +79,24 @@ def test_recognises_native_1080p_screen(shot):
     assert flow.current_screen(ImageScreen(load_1080p(shot))) == EXPECTED_1080P[shot]
 
 
+@pytest.mark.parametrize("name, shot", [("server_row", "search"), ("create_unit", "create_unit")])
+def test_native_1080p_text_crops_match_on_their_own(name, shot):
+    # The 1440p crops also pass the lowered thresholds here, so check the 1080p
+    # crop alone, at the default threshold: it fails if the crop goes missing,
+    # is cut from the wrong box or is scaled as if cut at 1440p.
+    crops = [t for t in load_templates(bundled_templates_dir())[name] if t[1] == 1080]
+    assert crops, f"no {name}.1080p.png"
+    assert match_all(prepare_frame(load_1080p(shot)), Vision({name: crops}).templates[name])
+
+
 def test_native_1080p_join_on_server_row():
-    screen = ImageScreen(load_1080p("browser"))
+    screen = ImageScreen(load_1080p("search"))
     screen.refresh()
     row = screen.find("server_row")
     joins = screen.find_all("browser_join")
     assert row and joins
     # The only row: name at about (365, 227), JOIN at about (1294, 233).
+    assert abs(row[0] - 365) < 15 and abs(row[1] - 227) < 15
     join = min(joins, key=lambda pos: abs(pos[1] - row[1]))
     assert abs(join[0] - 1294) < 15 and abs(join[1] - 233) < 15
 
