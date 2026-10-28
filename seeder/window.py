@@ -25,18 +25,18 @@ MINUTES = [f"{m:02d}" for m in range(0, 60, 5)]
 # Images drawn by tools/make_assets.py: 100% scaling in assets/, 200% in assets/2x.
 ASSETS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets"
 
-# Night sky warming to dusk over a jungle-green window, with amber for first light.
+# Night sky warming to dusk, carried down through the window, with amber for first light.
 NIGHT = "#0C1823"        # top of the header's sky; the title bar on Windows 11
-TREELINE = "#121C17"     # window body
-UNDERGROWTH = "#1D2A22"  # fields, list backgrounds
-EDGE = "#34463B"         # hairlines
+TWILIGHT = "#151A27"     # window body
+SLATE = "#1F2335"        # fields, list backgrounds
+EDGE = "#363A52"         # hairlines
 HAZE = "#ECE3D0"         # main text
-MIST = "#8E9C92"         # secondary text
+MIST = "#9C98B0"         # secondary text
 FIRST_LIGHT = "#F2A443"  # the action to take, and a server that still needs seeding
 PADDY = "#86C17A"        # a seeded server
 FLARE = "#F27A62"        # errors
 INK = "#1A140C"          # text on the amber button
-TRACK = "#26352C"        # empty part of the player meter
+TRACK = "#272B3F"        # empty part of the player meter
 
 PLAYERS_MAX = 100
 MARGIN = 24              # left and right of everything under the header, at 100% scaling
@@ -152,7 +152,7 @@ class SetupWindow:
         self.root.attributes("-alpha", 0.0)  # hidden until it's placed and themed, so nothing flashes
         self.root.title("SYN Vietnam Seeder")
         self.root.resizable(False, False)
-        self.root.configure(background=TREELINE)
+        self.root.configure(background=TWILIGHT)
         # 1.0 at 100% Windows scaling, 1.5 at 150%...; fonts follow by themselves, pixels and images don't.
         scale = self.root.winfo_fpixels("1i") / 96
         self.scale = 1.0 if scale < 1.1 else 2.0 if abs(scale - 2) < 0.05 else scale
@@ -164,7 +164,7 @@ class SetupWindow:
 
         header = self._image("header")
         tk.Label(self.root, image=header, borderwidth=0, highlightthickness=0,
-                 background=TREELINE).grid(row=0, column=0, sticky="nw")
+                 background=TWILIGHT).grid(row=0, column=0, sticky="nw")
         self.content_width = header.width() - 2 * px(MARGIN)  # so nothing below is wider than the picture
         body = ttk.Frame(self.root, padding=(px(MARGIN), px(18), px(MARGIN), px(14)))
         body.grid(row=1, column=0, sticky="nsew")
@@ -181,7 +181,7 @@ class SetupWindow:
         self.server.grid(row=0, column=1, sticky="sw", pady=(0, px(4)))
         self.need = ttk.Label(line, text="", font=self.font_semibold)
         self.need.grid(row=0, column=2, sticky="se", pady=(0, px(4)))
-        self.meter = tk.Canvas(body, width=self.content_width, height=px(32), background=TREELINE,
+        self.meter = tk.Canvas(body, width=self.content_width, height=px(32), background=TWILIGHT,
                                highlightthickness=0, borderwidth=0)
         self.meter.grid(row=2, column=0, sticky="w")
         self._draw_meter(None)
@@ -312,10 +312,10 @@ class SetupWindow:
         style = ttk.Style(self.root)
         style.theme_use("clam")  # the native Windows theme ignores colours
         img, px = self._image, self.px
-        style.configure(".", background=TREELINE, foreground=HAZE, font=self.font_body,
-                        bordercolor=EDGE, lightcolor=TREELINE, darkcolor=TREELINE, troughcolor=UNDERGROWTH,
+        style.configure(".", background=TWILIGHT, foreground=HAZE, font=self.font_body,
+                        bordercolor=EDGE, lightcolor=TWILIGHT, darkcolor=TWILIGHT, troughcolor=SLATE,
                         focuscolor=EDGE, selectbackground=FIRST_LIGHT, selectforeground=INK)
-        style.configure("TLabel", background=TREELINE, foreground=HAZE)
+        style.configure("TLabel", background=TWILIGHT, foreground=HAZE)
         style.configure("Muted.TLabel", foreground=MIST)
         style.configure("Small.TLabel", foreground=MIST, font=self.font_small)
         style.configure("Link.TLabel", foreground=FIRST_LIGHT, font=self.font_link)
@@ -351,7 +351,7 @@ class SetupWindow:
             ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
                 ("Checkbutton.label", {"sticky": "nsew"})]})]})])
         style.configure("Dawn.TCheckbutton", padding=(0, px(2), px(1), px(2)), focuscolor="#B88A4A")
-        style.map("Dawn.TCheckbutton", background=[("active", TREELINE)], foreground=[("active", HAZE)])
+        style.map("Dawn.TCheckbutton", background=[("active", TWILIGHT)], foreground=[("active", HAZE)])
 
         # Hour and minute pickers, and their drop-down lists
         style.element_create("Dawn.Combobox.field", "image", img("field"), ("focus", img("field-focus")),
@@ -363,10 +363,10 @@ class SetupWindow:
             ("Combobox.padding", {"expand": "1", "sticky": "nsew", "children": [
                 ("Combobox.textarea", {"sticky": "nsew"})]})]})])
         style.configure("Dawn.TCombobox", foreground=HAZE, padding=(px(10), px(4), 0, px(4)),
-                        selectbackground=UNDERGROWTH, selectforeground=HAZE, fieldbackground=UNDERGROWTH)
+                        selectbackground=SLATE, selectforeground=HAZE, fieldbackground=SLATE)
         style.map("Dawn.TCombobox", foreground=[("readonly", HAZE)],
-                  selectbackground=[("readonly", UNDERGROWTH)], selectforeground=[("readonly", HAZE)])
-        self.root.option_add("*TCombobox*Listbox.background", UNDERGROWTH)
+                  selectbackground=[("readonly", SLATE)], selectforeground=[("readonly", HAZE)])
+        self.root.option_add("*TCombobox*Listbox.background", SLATE)
         self.root.option_add("*TCombobox*Listbox.foreground", HAZE)
         self.root.option_add("*TCombobox*Listbox.selectBackground", FIRST_LIGHT)
         self.root.option_add("*TCombobox*Listbox.selectForeground", INK)
@@ -374,11 +374,11 @@ class SetupWindow:
         self.root.option_add("*TCombobox*Listbox.borderWidth", px(4))  # flat, so it reads as inner padding
         self.root.option_add("*TCombobox*Listbox.highlightThickness", 0)
         self.root.option_add("*TCombobox*Listbox.activeStyle", "none")
-        style.configure("ComboboxPopdownFrame", background=UNDERGROWTH, bordercolor=EDGE, relief="solid",
+        style.configure("ComboboxPopdownFrame", background=SLATE, bordercolor=EDGE, relief="solid",
                         borderwidth=1)
-        style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=UNDERGROWTH, arrowcolor=MIST,
-                        bordercolor=UNDERGROWTH, lightcolor=EDGE, darkcolor=EDGE, gripcount=0, arrowsize=px(11))
-        style.map("Vertical.TScrollbar", background=[("active", "#4A5E50")])
+        style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=SLATE, arrowcolor=MIST,
+                        bordercolor=SLATE, lightcolor=EDGE, darkcolor=EDGE, gripcount=0, arrowsize=px(11))
+        style.map("Vertical.TScrollbar", background=[("active", "#4D5270")])
 
     def _draw_meter(self, count: int | None) -> None:
         """Thin bar of players out of 100, with a tick where the server counts as seeded."""
