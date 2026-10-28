@@ -168,14 +168,12 @@ class SetupWindow:
         self.content_width = header.width() - 2 * px(MARGIN)  # so nothing below is wider than the picture
         body = ttk.Frame(self.root, padding=(px(MARGIN), px(18), px(MARGIN), px(14)))
         body.grid(row=1, column=0, sticky="nsew")
-        body.columnconfigure(0, minsize=px(144))
-        body.columnconfigure(1, weight=1)
+        body.columnconfigure(0, weight=1)
 
         # The server, and how far it is from seeded
-        ttk.Label(body, text=config.server_name, font=self.font_semibold).grid(
-            row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(body, text=config.server_name, font=self.font_semibold).grid(row=0, column=0, sticky="w")
         line = ttk.Frame(body)
-        line.grid(row=1, column=0, columnspan=2, sticky="we", pady=(px(2), px(6)))
+        line.grid(row=1, column=0, sticky="we", pady=(px(2), px(6)))
         line.columnconfigure(1, weight=1)
         self.count = ttk.Label(line, text="0", font=self.font_count, padding=(0, 0, px(6), 0))
         line.rowconfigure(0, minsize=self.count.winfo_reqheight())  # same height before the count arrives
@@ -185,66 +183,79 @@ class SetupWindow:
         self.need.grid(row=0, column=2, sticky="se", pady=(0, px(4)))
         self.meter = tk.Canvas(body, width=self.content_width, height=px(32), background=TREELINE,
                                highlightthickness=0, borderwidth=0)
-        self.meter.grid(row=2, column=0, columnspan=2, sticky="w")
+        self.meter.grid(row=2, column=0, sticky="w")
         self._draw_meter(None)
 
-        # When and how to seed
+        # When and how to seed: a row each, the setting on the left and its control against the right edge
+        settings = ttk.Frame(body)
+        settings.grid(row=3, column=0, sticky="we", pady=(px(10), 0))
+        settings.columnconfigure(0, weight=1)
+        for r in (0, 2, 4, 6):  # hairlines above, between and below the rows
+            tk.Frame(settings, height=max(1, px(1)), background=EDGE).grid(row=r, column=0, columnspan=2,
+                                                                       sticky="we")
+        for r in (1, 3, 5):
+            settings.rowconfigure(r, minsize=px(46))
+
         hour, minute = config.start_time.split(":")
-        ttk.Label(body, text="Seed every day at").grid(row=3, column=0, sticky="w", pady=(px(22), 0))
-        when = ttk.Frame(body)
-        when.grid(row=3, column=1, sticky="w", pady=(px(22), 0))
+        ttk.Label(settings, text="Seed every day at").grid(row=1, column=0, sticky="w")
+        when = ttk.Frame(settings)
+        when.grid(row=1, column=1, sticky="e")
+        self.clock = ttk.Label(when, style="Muted.TLabel")  # the pickers are 24-hour; this says AM or PM
+        self.clock.grid(row=0, column=0, padx=(0, px(12)))
         self.hour = ttk.Combobox(when, values=HOURS, width=3, state="readonly", style="Dawn.TCombobox",
                                  font=self.font_body)
         self.hour.set(hour)
-        self.hour.grid(row=0, column=0)
-        ttk.Label(when, text=":", font=self.font_semibold).grid(row=0, column=1, padx=px(6))
+        self.hour.grid(row=0, column=1)
+        ttk.Label(when, text=":", font=self.font_semibold).grid(row=0, column=2, padx=px(6))
         self.minute = ttk.Combobox(when, values=MINUTES, width=3, state="readonly", style="Dawn.TCombobox",
                                    font=self.font_body)
         self.minute.set(minute if minute in MINUTES else "00")
-        self.minute.grid(row=0, column=2)
-        self.clock = ttk.Label(when, style="Muted.TLabel")  # the pickers are 24-hour; this says AM or PM
-        self.clock.grid(row=0, column=3, padx=(px(12), 0))
+        self.minute.grid(row=0, column=3)
         for picker in (self.hour, self.minute):
             picker.bind("<<ComboboxSelected>>", lambda _: self._show_clock())
         self._show_clock()
 
-        ttk.Label(body, text="Game launcher").grid(row=4, column=0, sticky="w", pady=(px(10), 0))
+        ttk.Label(settings, text="Game launcher").grid(row=3, column=0, sticky="w")
         self.launcher = tk.StringVar(value=config.launcher)
-        chips = ttk.Frame(body)
-        chips.grid(row=4, column=1, sticky="w", pady=(px(10), 0))
+        chips = ttk.Frame(settings)
+        chips.grid(row=3, column=1, sticky="e")
         ttk.Radiobutton(chips, text="Steam", variable=self.launcher, value="steam", style="Chip.TRadiobutton",
                         width=6).grid(row=0, column=0, padx=(0, px(6)))
         ttk.Radiobutton(chips, text="Epic", variable=self.launcher, value="epic", style="Chip.TRadiobutton",
                         width=6).grid(row=0, column=1)
 
         self.enabled = tk.BooleanVar(value=schedule.is_scheduled())
-        ttk.Checkbutton(body, text="Seed automatically", variable=self.enabled, style="Dawn.TCheckbutton").grid(
-            row=5, column=1, sticky="w", pady=(px(12), 0))
+        ttk.Checkbutton(settings, text="Seed automatically", variable=self.enabled, style="Dawn.TCheckbutton"
+                        ).grid(row=5, column=0, columnspan=2, sticky="we")  # the whole row ticks it
 
-        # Actions
+        # Actions: three equal buttons across the width
         buttons = ttk.Frame(body)
-        buttons.grid(row=6, column=0, columnspan=2, sticky="we", pady=(px(24), 0))
-        buttons.columnconfigure(2, weight=1)
+        buttons.grid(row=4, column=0, sticky="we", pady=(px(20), 0))
+        for c in (0, 2, 4):
+            buttons.columnconfigure(c, weight=1, uniform="button")
+        for c in (1, 3):
+            buttons.columnconfigure(c, minsize=px(8))
         ttk.Button(buttons, text="Save", command=self.save, style="Primary.TButton").grid(
-            row=0, column=0, padx=(0, px(8)))
-        ttk.Button(buttons, text="Seed now", command=self.seed_now, style="Dawn.TButton").grid(row=0, column=1)
+            row=0, column=0, sticky="we")
+        ttk.Button(buttons, text="Seed now", command=self.seed_now, style="Dawn.TButton").grid(
+            row=0, column=2, sticky="we")
         ttk.Button(buttons, text="Stop seeding", command=self.stop, style="Dawn.TButton").grid(
-            row=0, column=3, sticky="e")
+            row=0, column=4, sticky="we")
 
         self.status = ttk.Label(body, text="Two\nlines", wraplength=self.content_width - 4, style="Muted.TLabel",
-                                justify="left")  # ttk puts 2 px either side of the text
-        self.status.grid(row=7, column=0, columnspan=2, sticky="nw", pady=(px(12), 0))
-        body.rowconfigure(7, minsize=px(12) + self.status.winfo_reqheight())  # keeps two lines, so nothing jumps
+                                justify="center", anchor="center")  # ttk puts 2 px either side of the text
+        self.status.grid(row=5, column=0, sticky="nwe", pady=(px(12), 0))
+        body.rowconfigure(5, minsize=px(12) + self.status.winfo_reqheight())  # keeps two lines, so nothing jumps
         self.status.config(text=self._schedule_text())
 
-        tk.Frame(body, height=max(1, px(1)), background=EDGE).grid(
-            row=8, column=0, columnspan=2, sticky="we", pady=(px(18), px(10)))
+        tk.Frame(body, height=max(1, px(1)), background=EDGE).grid(row=6, column=0, sticky="we",
+                                                                   pady=(px(14), px(10)))
         footer = ttk.Frame(body)
-        footer.grid(row=9, column=0, columnspan=2, sticky="we")
-        footer.columnconfigure(1, weight=1)
+        footer.grid(row=7, column=0, sticky="we")
+        for c in (0, 2):  # equal sides, so the middle is centred
+            footer.columnconfigure(c, weight=1, uniform="side")
         ttk.Label(footer, text=f"v{__version__}", style="Small.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(footer, text="Ctrl+Alt+End stops a run", style="Small.TLabel").grid(
-            row=0, column=1, sticky="w", padx=(px(16), 0))
+        ttk.Label(footer, text="Ctrl+Alt+End stops a run", style="Small.TLabel").grid(row=0, column=1)
         log_link = ttk.Label(footer, text="Open log", style="Link.TLabel", cursor="hand2")
         log_link.grid(row=0, column=2, sticky="e")
         log_link.bind("<Button-1>", lambda _: self.open_log())
@@ -336,10 +347,10 @@ class SetupWindow:
                              ("selected", "active", img("check-on-hover")), ("selected", img("check-on")),
                              ("active", img("check-off-hover")), sticky="w")
         style.layout("Dawn.TCheckbutton", [("Checkbutton.padding", {"sticky": "nsew", "children": [
-            ("Dawn.Checkbutton.indicator", {"side": "left", "sticky": ""}),
+            ("Dawn.Checkbutton.indicator", {"side": "right", "sticky": ""}),  # box at the right, label at the left
             ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
                 ("Checkbutton.label", {"sticky": "nsew"})]})]})])
-        style.configure("Dawn.TCheckbutton", padding=(0, px(2)), focuscolor="#B88A4A")
+        style.configure("Dawn.TCheckbutton", padding=(0, px(2), px(1), px(2)), focuscolor="#B88A4A")
         style.map("Dawn.TCheckbutton", background=[("active", TREELINE)], foreground=[("active", HAZE)])
 
         # Hour and minute pickers, and their drop-down lists

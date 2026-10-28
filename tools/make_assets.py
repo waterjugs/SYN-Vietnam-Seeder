@@ -119,8 +119,9 @@ def draw_sprout(draw, ox, oy, u, bold=False, outline=None) -> None:
 
 # --------------------------------------------------------------------------- header
 HEADER_W, HEADER_H = 480, 92
-MARK_X, MARK_Y, MARK_UNIT = 16, 8, 0.8  # the seedling's 64-unit box: stem on the baseline
-TITLE_X, TITLE_Y = 66, 18
+MARK_Y, MARK_UNIT = 8, 0.8  # the seedling's 64-unit box: stem on the baseline
+MARK_GAP = 14               # from the seedling's right leaf to the name
+TITLE_Y = 18
 
 
 def dusk(width: int, height: int, glow: float) -> Image.Image:
@@ -133,15 +134,21 @@ def dusk(width: int, height: int, glow: float) -> Image.Image:
 
 
 def make_header(path: Path, scale: int) -> None:
-    """The seedling and the app's name on the dusk wash, over a line of first light."""
+    """The seedling and the app's name, centred on the dusk wash, over a line of first light."""
     S = 4 * scale  # drawn at 4x the output size, then reduced
     W, H = HEADER_W * S, HEADER_H * S
     img = dusk(W, H, 0.11)
     d = ImageDraw.Draw(img)
     d.rectangle([0, H - 2 * S, W, H], fill=rgba(FIRST_LIGHT))
-    draw_sprout(d, MARK_X * S, MARK_Y * S, MARK_UNIT * S)
     title = ImageFont.truetype(str(FONTS / "barlow-condensed-latin-600-normal.woff2"), 36 * S)
-    d.text((TITLE_X * S, TITLE_Y * S), "SYN Vietnam Seeder", font=title, fill=rgba(HAZE))
+    name = "SYN Vietnam Seeder"
+    left, _, right, _ = d.textbbox((0, 0), name, font=title)
+    # the seedling's leaves span x 8..55 of its box; centre seedling + gap + name as one group
+    mark_w = (55 - 8) * MARK_UNIT * S
+    group = mark_w + MARK_GAP * S + (right - left)
+    x = (W - group) / 2
+    draw_sprout(d, x - 8 * MARK_UNIT * S, MARK_Y * S, MARK_UNIT * S)
+    d.text((x + mark_w + MARK_GAP * S - left, TITLE_Y * S), name, font=title, fill=rgba(HAZE))
     img = img.resize((HEADER_W * scale, HEADER_H * scale), Image.LANCZOS).convert("RGB")
     img.save(path)
 
@@ -164,10 +171,10 @@ def rounded(w, h, r, fill, border=None, bw=1.0, inset=0.0, scale=1) -> Image.Ima
 
 
 def check_image(on: bool, hover: bool, scale: int) -> Image.Image:
-    """18 x 18 box, plus 8 px of air on the right so the label does not touch it."""
+    """18 x 18 box."""
     S = 8 * scale
     box = 18
-    img = Image.new("RGBA", ((box + 8) * S, box * S), (0, 0, 0, 0))
+    img = Image.new("RGBA", (box * S, box * S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     if on:
         d.rounded_rectangle([S, S, (box - 1) * S - 1, (box - 1) * S - 1], radius=3 * S,
@@ -182,7 +189,7 @@ def check_image(on: bool, hover: bool, scale: int) -> Image.Image:
                             fill=rgba("#8E9C92" if hover else "#5C7064"))
         d.rounded_rectangle([int(2.5 * S), int(2.5 * S), int((box - 2.5) * S) - 1, int((box - 2.5) * S) - 1],
                             radius=2 * S, fill=rgba(UNDERGROWTH))
-    return img.resize(((box + 8) * scale, box * scale), Image.LANCZOS)
+    return img.resize((box * scale, box * scale), Image.LANCZOS)
 
 
 def chevron(colour: str, scale: int) -> Image.Image:
