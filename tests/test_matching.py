@@ -34,6 +34,20 @@ EXPECTED = {
 }
 RESOLUTIONS = {"1080p": (1920, 1080), "720p": (1280, 720), "1440p": (2560, 1440)}
 
+# Captured natively at 1920x1080 on 2026-10-27 (live run on game build v1.7).
+# The game draws small text differently from 1440p here, which the resized
+# screenshots above can't show: the 1440p server name and CREATE A UNIT crops
+# alone scored 0.85 and 0.84.
+EXPECTED_1080P = {
+    "menu": "menu_enlist",
+    "browser": "server_row",
+    "select_force": "select_force",
+    "units": "switch_team",
+    "create_unit": "create_unit",
+    "deploy_counting": None,
+    "ingame": None,
+}
+
 
 class ImageScreen(Vision):
     def __init__(self, image: np.ndarray):
@@ -54,6 +68,47 @@ def load(name: str, size: tuple[int, int]) -> np.ndarray:
 def test_recognises_screen(shot, res):
     screen = ImageScreen(load(shot, RESOLUTIONS[res]))
     assert flow.current_screen(screen) == EXPECTED[shot]
+
+
+def load_1080p(name: str) -> np.ndarray:
+    return cv2.imread(str(SCREENS / "1080p" / f"{name}.jpg"), cv2.IMREAD_GRAYSCALE)
+
+
+@pytest.mark.parametrize("shot", EXPECTED_1080P)
+def test_recognises_native_1080p_screen(shot):
+    assert flow.current_screen(ImageScreen(load_1080p(shot))) == EXPECTED_1080P[shot]
+
+
+def test_native_1080p_join_on_server_row():
+    screen = ImageScreen(load_1080p("browser"))
+    screen.refresh()
+    row = screen.find("server_row")
+    joins = screen.find_all("browser_join")
+    assert row and joins
+    # The only row: name at about (365, 227), JOIN at about (1294, 233).
+    join = min(joins, key=lambda pos: abs(pos[1] - row[1]))
+    assert abs(join[0] - 1294) < 15 and abs(join[1] - 233) < 15
+
+
+def test_native_1080p_units_and_create_unit():
+    units = ImageScreen(load_1080p("units"))
+    units.refresh()
+    plus = units.find("infantry_create", flow.INFANTRY_CREATE)
+    assert plus and 0.29 * 1920 < plus[0] < 0.53 * 1920
+    assert units.find("faction_nva", flow.FACTION_BADGE)  # this run picked NVA
+    popup = ImageScreen(load_1080p("create_unit"))
+    popup.refresh()
+    button = popup.find("create_unit_button", flow.CREATE_UNIT_BUTTON)
+    assert button and abs(button[0] / 1920 - 0.765) < 0.02 and abs(button[1] / 1080 - 0.741) < 0.02
+
+
+def test_native_1080p_force_cards():
+    screen = ImageScreen(load_1080p("select_force"))
+    screen.refresh()
+    us = screen.find(*flow.FORCE_CARDS["allies"])
+    nva = screen.find(*flow.FORCE_CARDS["axis"])
+    assert us and us[0] < 960
+    assert nva and nva[0] > 960
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)
