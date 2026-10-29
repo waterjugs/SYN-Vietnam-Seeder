@@ -364,6 +364,47 @@ def test_admin_message_over_a_menu_gets_y_if_clicks_do_not_close_it():
     assert screen.keys.count("y") == 1
 
 
+# Y has only been seen to work over gameplay; over a menu, a click.
+CLICK_ONLY = {**HAPPY_PATH, ("admin_yes", "y"): (set(), set())}
+
+
+def test_admin_message_over_a_menu_in_game_is_clicked_and_it_walks_back_in():
+    # e.g. a death or a map change brings up a menu with a message over it
+    screen = FakeScreen(CLICK_ONLY)
+    config, game, clock = Config(), FakeGame(screen), FakeClock()
+    calls = {"n": 0}
+
+    def fetch(_url):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            screen.visible = UNITS | {"admin_yes"}
+        return ServerStatus("S", 80 if calls["n"] >= 8 else 20, 10, 10, 0)
+
+    assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("admin_yes") == 2  # joining, then over Units
+    assert screen.clicks.count("infantry_create") == 2
+
+
+def test_queued_admin_messages_over_a_menu_are_all_clicked_away():
+    # Three messages, each replaced by the next as soon as it's clicked.
+    screen = FakeScreen(CLICK_ONLY)
+    left = {"n": 3}
+    click = screen.click
+
+    def click_one(pos):
+        click(pos)
+        if screen.clicks[-1] == "admin_yes":
+            left["n"] -= 1
+            if left["n"]:
+                screen.visible.add("admin_yes")  # the next one
+
+    screen.click = click_one
+    config, game, clock = Config(), FakeGame(screen), FakeClock()
+    assert runner.seed(config, game, screen, statuses(10, 10, 80), clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("admin_yes") == 3
+    assert screen.keys.count("y") <= 1  # at most one Y tried in between
+
+
 def test_no_input_while_game_is_not_in_front():
     config, game, screen, clock = make()
     game.focused = False
