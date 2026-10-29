@@ -36,11 +36,22 @@ def setup_logging() -> None:
     )
 
 
-def run_seed(config: Config, args: list[str], install_to: str | None = None) -> int:
+def run_seed(config: Config, args: list[str], install_to: str | None = None,
+             old_pids: list[int] | None = None) -> int:
     """``args`` are this process's arguments, passed on if a new version takes over.
-    ``install_to`` is set when this process is that new version."""
+    ``install_to`` and ``old_pids`` are set when this process is that new version."""
     import threading
 
+    # Before taking the lock: a new version that can't load fails here, and
+    # the old one gets the lock back and seeds as before.
+    try:
+        from . import crcon, runner, winapi
+        from .flow import Clock, Stopped
+        from .game import Game
+        from .screen import Screen
+    except Exception:
+        log.exception("SynSeeder v%s is missing a part and can't run", __version__)
+        return 2
     from . import instance, update
 
     if not instance.claim():
@@ -49,16 +60,11 @@ def run_seed(config: Config, args: list[str], install_to: str | None = None) -> 
     log.info("SynSeeder v%s", __version__)
     try:
         if install_to:
-            update.install(Path(install_to))
+            update.install(Path(install_to), old_pids or [])
         elif update.update_and_hand_over(config, args):
             return 0
     except Exception:  # an update going wrong mustn't stop today's seeding
         log.exception("Updating failed; carrying on with this version")
-
-    from . import crcon, runner, winapi
-    from .flow import Clock, Stopped
-    from .game import Game
-    from .screen import Screen
 
     stop = threading.Event()
     winapi.listen_for_stop_hotkey(stop)
@@ -101,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--minutes", type=float, default=10, help="how long --record runs")
     parser.add_argument("--every", type=float, default=3, help="seconds between --record shots")
     parser.add_argument("--max-minutes", type=int, help="with --seed: end the run after this long (for testing)")
-    parser.add_argument("--install-to", help=argparse.SUPPRESS)  # set by update.hand_over()
+    parser.add_argument("--install-to", help=argparse.SUPPRESS)  # these two are set by update.hand_over()
+    parser.add_argument("--old-pid", type=int, action="append", default=[], help=argparse.SUPPRESS)
     argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)
 
@@ -116,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.seed:
         if args.max_minutes:
             config.max_minutes = args.max_minutes
-        return run_seed(config, argv, args.install_to)
+        return run_seed(config, argv, args.install_to, args.old_pid)
     from . import window
 
     return window.run(config)

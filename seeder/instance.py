@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import subprocess
@@ -71,6 +72,26 @@ def spawn_detached(command: list[str]) -> subprocess.Popen:
     return subprocess.Popen(command, creationflags=DETACHED if os.name == "nt" else 0, close_fds=True, env=env)
 
 
+def own_pids() -> list[int]:
+    """This process and, in a built exe, the launcher that unpacked it. Both keep the exe file open."""
+    me = psutil.Process()
+    pids = [me.pid]
+    with contextlib.suppress(psutil.Error):
+        parent = me.parent()
+        if parent is not None and parent.exe() == me.exe():
+            pids.append(parent.pid)
+    return pids
+
+
+def wait_for_exit(pids: list[int], timeout: float) -> None:
+    """Waits up to ``timeout`` seconds for these processes to end."""
+    procs = []
+    for pid in pids:
+        with contextlib.suppress(psutil.Error):
+            procs.append(psutil.Process(pid))
+    psutil.wait_procs(procs, timeout=timeout)
+
+
 def end_tree(pid: int) -> None:
     """Ends a process and its children: a SynSeeder.exe is a launcher with the app as its child."""
     try:
@@ -100,15 +121,24 @@ def seeding_processes() -> list[psutil.Process]:
     return found
 
 
-def stop_seeding() -> bool:
-    """Ends any running seed. Returns True if there was one."""
-    procs = seeding_processes()
-    for proc in procs:
-        try:
-            proc.terminate()
-        except psutil.Error:
-            pass
-    psutil.wait_procs(procs, timeout=10)
-    if procs:
-        log.info("Stopped %s seeding process(es)", len(procs))
-    return bool(procs)
+def stop_seeding(passes: int = 3) -> bool:
+    """Ends any running seed. Returns True if there was one.
+
+    Looks again after each round, in case a run was handing over to a new
+    version and started it just as the old one was stopped.
+    """
+    stopped = 0
+    for _ in range(passes):
+        procs = seeding_processes()
+        if not procs:
+            break
+        for proc in procs:
+            try:
+                proc.terminate()
+            except psutil.Error:
+                pass
+        psutil.wait_procs(procs, timeout=10)
+        stopped += len(procs)
+    if stopped:
+        log.info("Stopped %s seeding process(es)", stopped)
+    return bool(stopped)
