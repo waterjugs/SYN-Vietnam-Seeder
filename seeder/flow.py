@@ -47,7 +47,7 @@ FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 # The two cards on Select Force.
 FORCE_CARDS = {"allies": ("force_us", (0.05, 0.30, 0.50, 0.55)), "axis": ("force_nva", (0.50, 0.30, 0.95, 0.55))}
 FORCE_TRIES = 5  # clicks (~10 s) on one card before trying the other, in case it's locked
-ADMIN_CLICKS = 2  # clicks on an admin message's YES before pressing its Y key instead
+ADMIN_CLICKS = 2  # clicks on an admin message's YES before also trying its Y key
 # The bottom right of the Create a Unit popup, where its CREATE UNIT button is.
 CREATE_UNIT_BUTTON = (0.55, 0.60, 0.95, 0.90)
 
@@ -126,6 +126,7 @@ class Navigator:
         # One team switch per trip in; a later rejoin may need another.
         self.switched_team = False
         self.in_game = False
+        self._admin_clicks = 0
         seen: set[str] = set()
         deployed = False
         quiet_ticks = 0
@@ -143,6 +144,8 @@ class Navigator:
                     deadline = min(deadline + self.clock.monotonic() - start, until)
                 continue
             name = current_screen(self.screen)
+            if name != "admin_yes":
+                self._admin_clicks = 0  # each message gets its own clicks
             if name is None:
                 in_game = deployed or (not fresh_launch and seen <= set(OVERLAYS))
                 if in_game:
@@ -168,7 +171,6 @@ class Navigator:
             if name not in OVERLAYS:
                 deployed = name == "deploy_button"
                 self.in_game = False
-                self._admin_clicks = 0
             if name not in OVERLAYS and name != "select_force":
                 self._force_tries, self._force_team = 0, None
             self.handle(name)
@@ -210,14 +212,19 @@ class Navigator:
     # One handler per screen in SCREENS.
 
     def _on_admin_yes(self) -> None:
-        # In game a click fires the weapon and the popup stays (on 10/28 it
-        # sat there 8 minutes), so press its Y key there, and over a menu
-        # if clicking YES hasn't closed it.
-        if self.in_game or self._admin_clicks >= ADMIN_CLICKS:
+        # Over gameplay the mouse aims, so a click fires the weapon and the
+        # message stays up (10/28: 8 minutes of it); there, press its Y key.
+        # Menus still show around the message: over one, click YES, which
+        # always works there, and mix in Y if a couple of clicks haven't.
+        menu = any(self.screen.find(name) for name in SCREENS if name not in OVERLAYS)
+        if self.in_game and not menu:
             self.screen.press("y")
             return
         self._admin_clicks += 1
-        self.screen.click(self.screen.find("admin_yes"))
+        if self._admin_clicks > ADMIN_CLICKS and self._admin_clicks % 2:
+            self.screen.press("y")
+        else:
+            self.screen.click(self.screen.find("admin_yes"))
 
     def _on_game_menu_leave(self) -> None:
         self.screen.press("esc")
