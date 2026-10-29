@@ -24,7 +24,7 @@ resolution, so the two text templates also have a 1080p crop,
 | `faction_nva.png` | NVA badge on Units/Deployment, to tell which team we're on |
 | `infantry_create.png` | The + that creates an infantry squad; clicked (the seeder never joins someone else's squad) |
 | `create_unit.png` | "Create a Unit" popup that the + opens |
-| `create_unit_button.png` | Its CREATE UNIT button; clicked |
+| `create_unit_button.png` | Its CREATE UNIT button (text only: the button is see-through); clicked |
 | `roles_confirm.png`, `roles_confirm.title.png`, `roles_confirm.select.png` | Edit Roles (own squad) or Select a Role (someone else's squad, in case the game puts us in one), by the F CONFIRM ROLE hint or either title bar; F confirms |
 | `admin_yes.png` | Admin message popup; clicked to close it |
 | `deploy_button.png` | Deployment screen; F deploys |
