@@ -34,6 +34,9 @@ class Config:
     # Daily start time (24h, local time) used by the scheduled task
     start_time: str = "07:00"
 
+    # Release builds install newer GitHub releases before a run (see update.py)
+    auto_update: bool = True
+
     # Timings, in seconds unless noted
     poll_seconds: int = 30
     anti_afk_seconds: int = 60

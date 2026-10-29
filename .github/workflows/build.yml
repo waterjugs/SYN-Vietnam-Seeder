@@ -18,6 +18,19 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+      - name: Mark a release build
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          # Installed copies compare the latest release's tag with their own
+          # version to decide whether to update, so the two must match.
+          version=$(python -c "import seeder; print(seeder.__version__)")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match __version__ = \"$version\" in seeder/__init__.py"
+            exit 1
+          fi
+          # Only an exe carrying this file updates itself (see seeder/update.py).
+          echo "$GITHUB_REF_NAME" > assets/release.txt
       - run: pyinstaller --noconfirm SynSeeder.spec
       - uses: actions/upload-artifact@v4
         with:

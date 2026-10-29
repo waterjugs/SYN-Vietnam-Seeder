@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import logging
 import os
-import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -46,8 +45,7 @@ SERVER_REFRESH_MS = 30_000  # how often the player count is fetched again while 
 
 def _start_seed_process() -> None:
     program, arguments = schedule.seed_command()
-    flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0  # detached, new group
-    subprocess.Popen([program, *arguments.split()], creationflags=flags, close_fds=True)
+    instance.spawn_detached([program, *arguments.split()])
 
 
 def _make_dpi_aware() -> None:

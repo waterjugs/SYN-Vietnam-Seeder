@@ -45,6 +45,10 @@ straight away and **Stop seeding** ends one and closes the game.
   after a crash (up to 3 times), and strafes now and then to dodge the
   idle kick.
 - Gives up after 4 hours whatever happens.
+- Keeps itself up to date: before each run it asks GitHub for the latest
+  release and, if that's newer, downloads it and lets the new version take
+  over the run. Only exes from a release do this, never one you built
+  yourself. To turn it off, set `"auto_update": false` in `config.json`.
 - Press **Ctrl+Alt+End** to stop a run (or use **Stop seeding** in the
   window). It only sends keys while the game is the active window, so
   alt-tabbing away pauses it rather than typing into your other apps.
@@ -71,4 +75,7 @@ build.bat                    # makes dist\SynSeeder.exe from SynSeeder.spec
 ```
 
 GitHub Actions runs the tests and builds `SynSeeder.exe` on every push.
-Pushing a tag like `v1.0.1` also publishes a release with the exe attached.
+Pushing a tag like `v1.0.1` also publishes a release with the exe attached,
+and every installed copy picks it up at its next run. Set `__version__` in
+`seeder/__init__.py` to the same number first: the build fails if the tag
+and the version don't match.

@@ -29,16 +29,24 @@ def seed_command() -> tuple[str, str]:
     """(program, arguments) that start a seeding run.
 
     A built exe copies itself to %LOCALAPPDATA%\\SynSeeder first, so the task
-    keeps working if the download is moved or deleted.
+    keeps working if the download is moved or deleted. It leaves a newer copy
+    there alone: that one has updated itself since this exe was downloaded.
     """
     if getattr(sys, "frozen", False):
         target = install_dir() / "SynSeeder.exe"
         current = Path(sys.executable).resolve()
-        if current != target.resolve():
+        if current != target.resolve() and not _newer_installed(target):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(current, target)
         return str(target), "--seed"
     return sys.executable, "-m seeder --seed"
+
+
+def _newer_installed(target: Path) -> bool:
+    from . import update
+
+    installed = update.file_version(target) if target.exists() else None
+    return installed is not None and installed > update.current_version()
 
 
 def task_xml(start_time: str, program: str, arguments: str, now: datetime | None = None) -> str:
