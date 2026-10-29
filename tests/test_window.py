@@ -101,23 +101,53 @@ def test_load_server_shows_the_count(win, monkeypatch):
     assert (win.count.cget("text"), win.need.cget("text")) == ("12", "Needs 68 more")
 
 
-def test_player_count_keeps_refreshing(win, monkeypatch):
-    loads, timers = [], []
+class FakeFetch:
+    """Stands in for the fetch thread: runs at once unless told to keep running."""
 
-    class RunNow:  # the fetch, without a thread
-        def __init__(self, target, daemon):
-            self.target = target
+    hang = False
 
-        def start(self):
+    def __init__(self, target, daemon):
+        self.target, self.daemon, self.running = target, daemon, False
+
+    def start(self):
+        if not FakeFetch.hang:
             self.target()
+        self.running = FakeFetch.hang
 
-    monkeypatch.setattr(window.threading, "Thread", RunNow)
+    def is_alive(self):
+        return self.running
+
+
+@pytest.fixture
+def fetches(win, monkeypatch):
+    win._fetch.join()  # the window's own first fetch, a no-op here
+    loads, timers = [], []
+    FakeFetch.hang = False
+    monkeypatch.setattr(window.threading, "Thread", FakeFetch)
     monkeypatch.setattr(window.SetupWindow, "_load_server", lambda self: loads.append(1))
     monkeypatch.setattr(win.root, "after", lambda ms, then: timers.append((ms, then)))
+    return loads, timers
+
+
+def test_player_count_keeps_refreshing(win, fetches):
+    loads, timers = fetches
     win._refresh_server()
     assert loads == [1] and timers == [(window.SERVER_REFRESH_MS, win._refresh_server)]
+    assert win._fetch.daemon  # off the Tk thread, and never keeps the app open
     timers.pop()[1]()  # 30 s later
     assert loads == [1, 1] and len(timers) == 1
+
+
+def test_slow_fetch_is_not_doubled_up(win, fetches):
+    _, timers = fetches
+    FakeFetch.hang = True
+    win._refresh_server()
+    first = win._fetch
+    timers.pop()[1]()  # 30 s later, still waiting on the stats site
+    assert win._fetch is first and len(timers) == 1  # no second fetch, but still ticking
+    first.running = False
+    timers.pop()[1]()
+    assert win._fetch is not first
 
 
 def test_save_writes_settings_and_schedules(win, calls):
