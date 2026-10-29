@@ -181,6 +181,7 @@ class SetupWindow:
         scale = self.root.winfo_fpixels("1i") / 96
         self.scale = 1.0 if scale < 1.1 else 2.0 if abs(scale - 2) < 0.05 else scale
         self._images: dict[str, tk.PhotoImage] = {}
+        self._fetch: threading.Thread | None = None  # the latest player-count fetch
         self._fonts()
         self._style()
         self._icon()
@@ -458,7 +459,10 @@ class SetupWindow:
         return "Not scheduled. Tick “Seed automatically” and Save."
 
     def _refresh_server(self) -> None:
-        threading.Thread(target=self._load_server, daemon=True).start()  # fetch waits up to 10 s
+        # One fetch at a time, so a slow one can't land after a newer count and replace it.
+        if self._fetch is None or not self._fetch.is_alive():
+            self._fetch = threading.Thread(target=self._load_server, daemon=True)
+            self._fetch.start()
         self.root.after(SERVER_REFRESH_MS, self._refresh_server)
 
     def _load_server(self) -> None:
