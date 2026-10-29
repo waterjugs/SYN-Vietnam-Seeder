@@ -39,7 +39,9 @@ BOXES = {
     "force_nva": ("select_force", 2021, 601, 2128, 641),
     # create_unit.jpg too (the popup after the + on Units)
     "create_unit": ("create_unit", 598, 408, 893, 472),
-    "create_unit_button": ("create_unit", 1770, 1025, 2150, 1109),
+    # Text only: the button's fill is see-through, so the world behind the
+    # menu shifts the score (0.87 on a rejoin, 0.97 here); the text stays 0.96+.
+    "create_unit_button": ("create_unit", 1846, 1046, 2074, 1088),
 }
 
 # The game draws small text differently at 1080p, so text templates also get

@@ -23,6 +23,10 @@ EXPECTED = {
     "select_force": "select_force",  # assembled from native-res zooms of the live screen
     "units": "switch_team",
     "create_unit": "create_unit",  # popup after +; assembled from native-res zooms
+    # 2026-10-29 live rejoin (the game skips Select Force): brighter scenery
+    # shows through the see-through CREATE UNIT button.
+    "rejoin_units": "switch_team",
+    "rejoin_create_unit": "create_unit",
     "roles_msg": "admin_yes",
     "roles": "roles_confirm",
     "roles_live": "roles_confirm",  # 2026-10-26 live run, half-res capture: other background behind "CONFIRM ROLE"
@@ -144,9 +148,11 @@ def test_select_force_cards(res):
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)
-def test_create_unit_button(res):
+@pytest.mark.parametrize("shot", ["create_unit", "rejoin_create_unit"])
+def test_create_unit_button(shot, res):
+    # On the rejoin the whole button (fill included) scored 0.87; its text alone 0.97.
     w, h = RESOLUTIONS[res]
-    screen = ImageScreen(load("create_unit", (w, h)))
+    screen = ImageScreen(load(shot, (w, h)))
     screen.refresh()
     button = screen.find("create_unit_button", flow.CREATE_UNIT_BUTTON)
     # CREATE UNIT sits at about (0.765, 0.741) of the screen
