@@ -119,6 +119,7 @@ HAPPY_PATH = {
     "create_unit_button": ({"create_unit", "create_unit_button"}, {"roles_confirm"}),
     "switch_team": ({"faction_nva"}, set()),
     "admin_yes": ({"admin_yes"}, set()),
+    ("admin_yes", "y"): ({"admin_yes"}, set()),
     ("roles_confirm", "f"): ({"roles_confirm"}, {"deploy_button"}),
     ("deploy_button", "f"): ({"deploy_button"}, set()),
     ("game_menu_leave", "esc"): ({"game_menu_leave"}, set()),

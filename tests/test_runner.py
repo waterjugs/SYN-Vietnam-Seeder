@@ -331,9 +331,37 @@ def test_overlays_in_game_are_closed_without_leaving():
 
     assert runner.seed(config, game, screen, fetch, clock) is runner.Outcome.SEEDED
     assert game.launches == 1 and game.closes == 1
-    assert screen.clicks.count("admin_yes") == 2  # once while joining, once in game
+    # Clicked over the menus while joining; in game a click would fire the
+    # weapon, so there it's closed with its Y key.
+    assert screen.clicks.count("admin_yes") == 1
+    assert screen.keys.count("y") == 1
     assert "esc" in screen.keys
     assert screen.keys.count("space") == 1  # only the splash, never in game
+
+
+def test_admin_message_right_after_deploying_is_closed_with_y():
+    # 10/28: the message came up just after F on Deployment, over gameplay,
+    # where clicks fire the weapon and never reach it.
+    transitions = {
+        **HAPPY_PATH,
+        "browser_join": (HAPPY_PATH["browser_join"][0], {"select_force", "force_us", "force_nva"}),
+        ("deploy_button", "f"): ({"deploy_button"}, {"admin_yes"}),
+        "admin_yes": (set(), set()),
+    }
+    screen = FakeScreen(transitions)
+    config, game, clock = Config(), FakeGame(screen), FakeClock()
+    assert runner.seed(config, game, screen, statuses(10, 10, 80), clock) is runner.Outcome.SEEDED
+    assert "admin_yes" not in screen.clicks
+    assert screen.keys.count("y") == 1
+
+
+def test_admin_message_over_a_menu_gets_y_if_clicks_do_not_close_it():
+    transitions = {**HAPPY_PATH, "admin_yes": (set(), set())}
+    screen = FakeScreen(transitions)
+    config, game, clock = Config(), FakeGame(screen), FakeClock()
+    assert runner.seed(config, game, screen, statuses(10, 10, 80), clock) is runner.Outcome.SEEDED
+    assert screen.clicks.count("admin_yes") == flow.ADMIN_CLICKS
+    assert screen.keys.count("y") == 1
 
 
 def test_no_input_while_game_is_not_in_front():
