@@ -41,6 +41,7 @@ TRACK = "#272B3F"        # empty part of the player meter
 
 PLAYERS_MAX = 100
 MARGIN = 24              # left and right of everything under the header, at 100% scaling
+SERVER_REFRESH_MS = 30_000  # how often the player count is fetched again while the window is open
 
 
 def _start_seed_process() -> None:
@@ -286,7 +287,7 @@ class SetupWindow:
         log_link.bind("<Leave>", lambda _: log_link.configure(style="Link.TLabel"))
 
         self._show()
-        threading.Thread(target=self._load_server, daemon=True).start()
+        self._refresh_server()
 
     # The look
 
@@ -455,6 +456,10 @@ class SetupWindow:
             return (f"Seeds every day at {self.config.start_time}. Leave the PC on, signed in and "
                     "unlocked; if it's asleep it runs when it wakes.")
         return "Not scheduled. Tick “Seed automatically” and Save."
+
+    def _refresh_server(self) -> None:
+        threading.Thread(target=self._load_server, daemon=True).start()  # fetch waits up to 10 s
+        self.root.after(SERVER_REFRESH_MS, self._refresh_server)
 
     def _load_server(self) -> None:
         status = crcon.fetch(self.config.crcon_url)

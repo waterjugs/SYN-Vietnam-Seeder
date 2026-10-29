@@ -101,6 +101,25 @@ def test_load_server_shows_the_count(win, monkeypatch):
     assert (win.count.cget("text"), win.need.cget("text")) == ("12", "Needs 68 more")
 
 
+def test_player_count_keeps_refreshing(win, monkeypatch):
+    loads, timers = [], []
+
+    class RunNow:  # the fetch, without a thread
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(window.threading, "Thread", RunNow)
+    monkeypatch.setattr(window.SetupWindow, "_load_server", lambda self: loads.append(1))
+    monkeypatch.setattr(win.root, "after", lambda ms, then: timers.append((ms, then)))
+    win._refresh_server()
+    assert loads == [1] and timers == [(window.SERVER_REFRESH_MS, win._refresh_server)]
+    timers.pop()[1]()  # 30 s later
+    assert loads == [1, 1] and len(timers) == 1
+
+
 def test_save_writes_settings_and_schedules(win, calls):
     win.hour.set("19")
     win.minute.set("05")
