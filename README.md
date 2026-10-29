@@ -7,7 +7,8 @@ the in-game server browser, picks the team with fewer players, creates
 its own infantry squad (it never joins someone else's) and deploys. It
 stays in until the server reaches 80, then closes the game.
 
-Tested end to end on a live PC with game build v1.7 (October 2026).
+Tested end to end on a live PC with game build v1.7 (October 2026), at
+2560x1440 and 1920x1080.
 
 ## Using it
 
