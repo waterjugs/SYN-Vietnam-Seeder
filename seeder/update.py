@@ -10,10 +10,16 @@ A running exe can't be overwritten, and renaming it out of the way isn't
 safe either: a PyInstaller exe keeps reading its own file for code it hasn't
 loaded yet, and would then read the new exe instead. So the new version
 finishes the job. The old one lets go of the seeding lock and starts
-``SynSeeder-update.exe --install-to <old exe> --seed``; once the new one has
-the lock, the old one exits. The new one waits for the old file to come
-free, copies itself over it and carries on with the run. The next run
-deletes SynSeeder-update.exe.
+``SynSeeder-update.exe --install-to <old exe> --old-pid <pid> --seed``; once
+the new one has the lock, the old one exits. The new one waits for the old
+processes to end, copies itself over the old file and carries on with the
+run. If something else still has the file open, such as a SynSeeder window
+started from it, the new one keeps trying in the background during the run,
+and keeps SynSeeder-update.exe so the next run can hand over again without
+downloading it again.
+
+A release that fails to start three times is skipped until a newer one is
+out, so a bad release can't hold up every run.
 """
 
 from __future__ import annotations
@@ -27,20 +33,26 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__, instance
+from .config import app_dir
 
 log = logging.getLogger(__name__)
 
 LATEST_RELEASE = "https://api.github.com/repos/waterjugs/SYN-Vietnam-Seeder/releases/latest"
 ASSET_NAME = "SynSeeder.exe"
 UPDATE_NAME = "SynSeeder-update.exe"
+FAILURES_NAME = "update-failed.json"  # in app_dir(): the release that last failed to start, and how often
+MAX_FAILURES = 3
 HANDOVER_SECONDS = 120  # for the new version to start; antivirus can take a while over a new exe
-INSTALL_SECONDS = 120  # for the old version's file to come free once it has exited
+EXIT_SECONDS = 60  # for the old version to exit once the new one has the lock
+REPLACE_TRIES = 5  # a second apart, once the old version has exited
+RETRY_SECONDS = 30  # between tries in the background after that
 
 Version = tuple[int, int, int]
 
@@ -113,6 +125,8 @@ def download(release: Release, dest: Path, opener=_get, timeout: float = 30) -> 
                 digest.update(chunk)
                 size += len(chunk)
                 out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
         if head != b"MZ":
             raise ValueError("it isn't a Windows program")
         if release.size and size != release.size:
@@ -128,11 +142,41 @@ def download(release: Release, dest: Path, opener=_get, timeout: float = 30) -> 
         return False
 
 
+def downloaded(release: Release, path: Path) -> bool:
+    """True if an earlier run already downloaded this release's exe to ``path``."""
+    if not release.sha256:
+        return False
+    try:
+        with open(path, "rb") as f:
+            return hashlib.file_digest(f, "sha256").hexdigest() == release.sha256
+    except OSError:
+        return False
+
+
 def cleanup(folder: Path) -> None:
-    """Deletes what an earlier update left next to the exe."""
-    for name in (UPDATE_NAME, UPDATE_NAME + ".part", ASSET_NAME + ".new"):
-        with contextlib.suppress(OSError):
-            (folder / name).unlink()
+    """Deletes half-finished downloads and installs an earlier run left next to the exe."""
+    for name in (UPDATE_NAME + ".part", ASSET_NAME + ".new"):
+        _remove(folder / name)
+
+
+def _remove(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def failures(tag: str) -> int:
+    """How many times this release has failed to start."""
+    try:
+        record = json.loads((app_dir() / FAILURES_NAME).read_text(encoding="utf-8"))
+        return int(record["failures"]) if record["tag"] == tag else 0
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
+def record_failure(tag: str) -> None:
+    with contextlib.suppress(OSError):
+        (app_dir() / FAILURES_NAME).write_text(json.dumps({"tag": tag, "failures": failures(tag) + 1}),
+                                               encoding="utf-8")
 
 
 def update_and_hand_over(config, args: list[str]) -> bool:
@@ -141,20 +185,27 @@ def update_and_hand_over(config, args: list[str]) -> bool:
     True means the new version has taken over the run and this process
     should exit without seeding; False means carry on with this version.
     """
-    exe = Path(sys.executable)
     if not release_build():
         return False
+    exe = Path(sys.executable)
+    new = exe.with_name(UPDATE_NAME)
     cleanup(exe.parent)
-    if not config.auto_update:
-        return False
-    release = latest()
+    release = latest() if config.auto_update else None
     if release is None or release.version <= current_version():
+        _remove(new)
+        return False
+    if failures(release.tag) >= MAX_FAILURES:
+        log.warning("Skipping %s: it failed to start %s times. A newer release will be tried.",
+                    release.tag, MAX_FAILURES)
+        _remove(new)
         return False
     log.info("Updating from v%s to %s", __version__, release.tag)
-    new = exe.with_name(UPDATE_NAME)
-    if not download(release, new):
+    if not (downloaded(release, new) or download(release, new)):
         return False
-    return hand_over(new, exe, release.tag, args)
+    if hand_over(new, exe, release.tag, args):
+        return True
+    record_failure(release.tag)
+    return False
 
 
 def hand_over(new: Path, exe: Path, tag: str, args: list[str], instance=instance, clock=time) -> bool:
@@ -163,10 +214,11 @@ def hand_over(new: Path, exe: Path, tag: str, args: list[str], instance=instance
     True once it has taken the seeding lock. False if it didn't start; then
     this process has the lock back and carries on as it is.
     """
+    old = [arg for pid in instance.own_pids() for arg in ("--old-pid", str(pid))]
     instance.release()
     proc = None
     try:
-        proc = instance.spawn_detached([str(new), "--install-to", str(exe), *args])
+        proc = instance.spawn_detached([str(new), "--install-to", str(exe), *old, *args])
         deadline = clock.monotonic() + HANDOVER_SECONDS
         while clock.monotonic() < deadline and proc.poll() is None:
             if instance.held_elsewhere():
@@ -178,36 +230,52 @@ def hand_over(new: Path, exe: Path, tag: str, args: list[str], instance=instance
         log.warning("Couldn't start %s: %s", tag, exc)
     if proc is not None and proc.poll() is None:
         instance.end_tree(proc.pid)
-    with contextlib.suppress(OSError):
-        new.unlink()
+    _remove(new)
     if not instance.claim():
-        return True  # it took the lock just as we gave up on it
+        log.info("Another seeding run started meanwhile; leaving it to that one")
+        return True
     return False
 
 
-def install(target: Path, clock=time) -> bool:
+def install(target: Path, old_pids: list[int], clock=time, instance=instance) -> bool:
     """Run by the new version that hand_over() started: copies this exe over ``target``.
 
-    Waits for the old version to exit, since Windows won't replace a
-    running exe. False if it never came free; the next run tries again.
+    Waits for the old version's processes to end, since Windows won't
+    replace a running exe. If something else still has the file open, it
+    returns False and keeps trying in the background for the rest of the
+    run; a later run hands over again if this one never managed.
     """
     temp = target.with_name(target.name + ".new")
     try:
-        shutil.copy2(sys.executable, temp)
+        with open(sys.executable, "rb") as source, open(temp, "wb") as out:
+            shutil.copyfileobj(source, out, 1 << 20)
+            out.flush()
+            os.fsync(out.fileno())  # on disk before it replaces the only working copy
     except OSError as exc:
         log.warning("Couldn't copy the update into place: %s", exc)
+        _remove(temp)
         return False
-    deadline = clock.monotonic() + INSTALL_SECONDS
+    instance.wait_for_exit(old_pids, EXIT_SECONDS)
+    if replace(temp, target, REPLACE_TRIES, 1, clock):
+        return True
+    log.warning("Couldn't replace %s yet; something has it open, maybe a SynSeeder window started from it. "
+                "Trying again every %s s during this run.", target, RETRY_SECONDS)
+    threading.Thread(target=replace, args=(temp, target, None, RETRY_SECONDS, clock), daemon=True).start()
+    return False
+
+
+def replace(temp: Path, target: Path, tries: int | None, wait: float, clock=time) -> bool:
+    """Moves ``temp`` over ``target``, trying ``tries`` times (None: until it works)."""
+    attempt = 0
     while True:
+        attempt += 1
         try:
             os.replace(temp, target)
         except OSError as exc:
-            if clock.monotonic() >= deadline:
-                log.warning("Couldn't replace %s (%s); the next run will try again", target, exc)
-                with contextlib.suppress(OSError):
-                    temp.unlink()
+            if tries is not None and attempt >= tries:
+                log.info("Couldn't replace %s: %s", target, exc)
                 return False
-            clock.sleep(1)
+            clock.sleep(wait)
         else:
             log.info("Installed v%s", __version__)
             return True
