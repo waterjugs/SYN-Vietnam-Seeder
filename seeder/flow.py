@@ -47,6 +47,7 @@ FACTION_BADGE = (0.0, 0.75, 0.12, 0.95)
 # The two cards on Select Force.
 FORCE_CARDS = {"allies": ("force_us", (0.05, 0.30, 0.50, 0.55)), "axis": ("force_nva", (0.50, 0.30, 0.95, 0.55))}
 FORCE_TRIES = 5  # clicks (~10 s) on one card before trying the other, in case it's locked
+ADMIN_CLICKS = 2  # clicks on an admin message's YES before pressing its Y key instead
 # The bottom right of the Create a Unit popup, where its CREATE UNIT button is.
 CREATE_UNIT_BUTTON = (0.55, 0.60, 0.95, 0.90)
 
@@ -105,6 +106,9 @@ class Navigator:
         self.waiting = waiting
         self.alive = alive
         self.switched_team = False
+        # True from deploying on, when the mouse aims instead of clicking menus.
+        self.in_game = False
+        self._admin_clicks = 0
         self._force_tries = 0
         self._force_team: str | None = None
         self._last_refresh = float("-inf")
@@ -121,6 +125,7 @@ class Navigator:
         deadline = self.clock.monotonic() + timeout
         # One team switch per trip in; a later rejoin may need another.
         self.switched_team = False
+        self.in_game = False
         seen: set[str] = set()
         deployed = False
         quiet_ticks = 0
@@ -141,6 +146,7 @@ class Navigator:
             if name is None:
                 in_game = deployed or (not fresh_launch and seen <= set(OVERLAYS))
                 if in_game:
+                    self.in_game = True
                     quiet_ticks += 1
                     if quiet_ticks >= 3:
                         log.info("In game")
@@ -161,6 +167,8 @@ class Navigator:
             seen.add(name)
             if name not in OVERLAYS:
                 deployed = name == "deploy_button"
+                self.in_game = False
+                self._admin_clicks = 0
             if name not in OVERLAYS and name != "select_force":
                 self._force_tries, self._force_team = 0, None
             self.handle(name)
@@ -202,6 +210,13 @@ class Navigator:
     # One handler per screen in SCREENS.
 
     def _on_admin_yes(self) -> None:
+        # In game a click fires the weapon and the popup stays (on 10/28 it
+        # sat there 8 minutes), so press its Y key there, and over a menu
+        # if clicking YES hasn't closed it.
+        if self.in_game or self._admin_clicks >= ADMIN_CLICKS:
+            self.screen.press("y")
+            return
+        self._admin_clicks += 1
         self.screen.click(self.screen.find("admin_yes"))
 
     def _on_game_menu_leave(self) -> None:
@@ -209,6 +224,7 @@ class Navigator:
 
     def _on_deploy_button(self) -> None:
         self.screen.press("f")
+        self.in_game = True  # until a menu shows again
 
     def _on_roles_confirm(self) -> None:
         self.screen.press("f")
