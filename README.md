@@ -31,6 +31,15 @@ unlocked at that time (it runs late if the PC was asleep). Set the game to
 Borderless / Windowed Fullscreen so the seeder can see it. **Seed now** starts a run
 straight away and **Stop seeding** ends one and closes the game.
 
+## Terms and privacy
+
+Using SynSeeder means agreeing to its [Terms of Service](TERMS.md). In
+short, it comes as is, and Steam's rules ban automated play like this, so
+any risk to your game account is yours. The [Privacy Policy](PRIVACY.md)
+lists what it keeps on your PC and the only places it connects to: the
+server's stats page and GitHub. Both are linked at the bottom of the
+window.
+
 ## What it does
 
 - Skips the whole run if the server is already seeded, unreachable, or if
@@ -60,7 +69,8 @@ straight away and **Stop seeding** ends one and closes the game.
 Settings live in `%APPDATA%\SynSeeder\config.json` and the log in
 `%APPDATA%\SynSeeder\seeder.log`. If it ever gets stuck on a screen it
 doesn't know (after a game patch, say), it saves a screenshot to
-`%APPDATA%\SynSeeder\debug`; send that and the log to whoever maintains it.
+`%APPDATA%\SynSeeder\debug`. To get it fixed, send that and the log privately; the
+[Privacy Policy](PRIVACY.md#sending-your-log-or-screenshots-to-someone) says how.
 
 ## Development
 

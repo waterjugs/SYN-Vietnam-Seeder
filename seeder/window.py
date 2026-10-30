@@ -9,6 +9,7 @@ import sys
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+import webbrowser
 from pathlib import Path
 from tkinter import ttk
 
@@ -41,6 +42,8 @@ TRACK = "#272B3F"        # empty part of the player meter
 PLAYERS_MAX = 100
 MARGIN = 24              # left and right of everything under the header, at 100% scaling
 SERVER_REFRESH_MS = 30_000  # how often the player count is fetched again while the window is open
+TERMS_URL = "https://github.com/waterjugs/SYN-Vietnam-Seeder/blob/main/TERMS.md"
+PRIVACY_URL = "https://github.com/waterjugs/SYN-Vietnam-Seeder/blob/main/PRIVACY.md"
 
 
 def _start_seed_process() -> None:
@@ -280,11 +283,12 @@ class SetupWindow:
             footer.columnconfigure(c, weight=1, uniform="side")
         ttk.Label(footer, text=f"v{__version__}", style="Small.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(footer, text="Ctrl+Alt+End stops a run", style="Small.TLabel").grid(row=0, column=1)
-        log_link = ttk.Label(footer, text="Open log", style="Link.TLabel", cursor="hand2")
-        log_link.grid(row=0, column=2, sticky="e")
-        log_link.bind("<Button-1>", lambda _: self.open_log())
-        log_link.bind("<Enter>", lambda _: log_link.configure(style="LinkHover.TLabel"))
-        log_link.bind("<Leave>", lambda _: log_link.configure(style="Link.TLabel"))
+        self._link(footer, "Open log", self.open_log).grid(row=0, column=2, sticky="e")
+        legal = ttk.Frame(footer)  # centred under the middle
+        legal.grid(row=1, column=0, columnspan=3, pady=(px(6), 0))
+        self._link(legal, "Terms of Service", lambda: webbrowser.open(TERMS_URL)).grid(row=0, column=0)
+        ttk.Label(legal, text="·", style="Small.TLabel").grid(row=0, column=1, padx=px(6))
+        self._link(legal, "Privacy Policy", lambda: webbrowser.open(PRIVACY_URL)).grid(row=0, column=2)
 
         self._show()
         self._refresh_server()
@@ -330,6 +334,13 @@ class SetupWindow:
         self.font_semibold = pick_font(self.root, 10, *bold)
         self.font_count = pick_font(self.root, 14, *bold)
         self.font_link = self.font_small + ("underline",)
+
+    def _link(self, parent: tk.Misc, text: str, action) -> ttk.Label:
+        link = ttk.Label(parent, text=text, style="Link.TLabel", cursor="hand2")
+        link.bind("<Button-1>", lambda _: action())
+        link.bind("<Enter>", lambda _: link.configure(style="LinkHover.TLabel"))
+        link.bind("<Leave>", lambda _: link.configure(style="Link.TLabel"))
+        return link
 
     def _baseline_lift(self, font: tuple) -> int:
         """How far to raise text in this font, hung from the count line's bottom, to sit on the count's baseline."""

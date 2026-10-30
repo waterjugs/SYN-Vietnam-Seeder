@@ -218,6 +218,28 @@ def test_stop_with_nothing_running(win, monkeypatch):
     assert win.status.cget("text") == "Nothing is seeding right now."
 
 
+def labelled(widget: tk.Misc, text: str) -> tk.Misc:
+    """The widget in ``widget``'s tree that shows ``text``."""
+    for child in widget.winfo_children():
+        if "text" in child.keys() and child.cget("text") == text:
+            return child
+        try:
+            return labelled(child, text)
+        except LookupError:
+            pass
+    raise LookupError(text)
+
+
+def test_footer_links_open_the_terms_and_privacy_policy(win, monkeypatch):
+    opened = []
+    monkeypatch.setattr(window.webbrowser, "open", opened.append)
+    win.root.update()
+    for text in ("Terms of Service", "Privacy Policy"):
+        labelled(win.root, text).event_generate("<Button-1>")
+    assert opened == ["https://github.com/waterjugs/SYN-Vietnam-Seeder/blob/main/TERMS.md",
+                      "https://github.com/waterjugs/SYN-Vietnam-Seeder/blob/main/PRIVACY.md"]
+
+
 @needs_display
 def test_opens_in_a_fresh_process(tmp_path):
     """The way the exe starts, DPI awareness included, which can only be set once per process."""
