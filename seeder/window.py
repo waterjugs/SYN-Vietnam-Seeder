@@ -182,6 +182,7 @@ class SetupWindow:
         self.scale = 1.0 if scale < 1.1 else 2.0 if abs(scale - 2) < 0.05 else scale
         self._images: dict[str, tk.PhotoImage] = {}
         self._fetch: threading.Thread | None = None  # the latest player-count fetch
+        self._count: int | None = None  # the player count on show
         self._fonts()
         self._style()
         self._icon()
@@ -437,6 +438,7 @@ class SetupWindow:
         self.clock.config(text=f"{hour % 12 or 12}:{self.minute.get()} {'AM' if hour < 12 else 'PM'}")
 
     def _show_server(self, count: int | None) -> None:
+        self._count = count
         if count is None:
             self.count.grid_remove()
             self.server.config(text="Couldn't reach the server stats.")
@@ -490,6 +492,15 @@ class SetupWindow:
             self.status.config(text="Already seeding.")
             return
         self.save()
+        # A run stops at once in these cases, so say why here rather than "started".
+        if self._count is not None and self._count >= self.config.seeded_threshold:
+            self.status.config(text=f"The server is already seeded ({self._count} players), so there's "
+                                    "nothing to do.")
+            return
+        if Game(self.config).running():
+            self.status.config(text="The game is already open. Close it first: Seed now won't take over "
+                                    "a game you're playing.")
+            return
         _start_seed_process()
         self.status.config(text="Seeding started. The game will open shortly; leave the "
                                 "mouse and keyboard alone while it joins.")
