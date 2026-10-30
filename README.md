@@ -12,12 +12,17 @@ Tested end to end on a live PC with game build v1.7 (October 2026), at
 
 ## Using it
 
-1. Download `SynSeeder.exe` from the
+1. Start the game yourself once and finish the **Getting Started** and
+   **Squad Leader** tutorials. The game won't let you create a squad until
+   both are done, and the seeder always creates its own. Tutorial progress
+   doesn't carry over between Steam and Epic, so do them on the store you'll
+   seed with.
+2. Download `SynSeeder.exe` from the
    [latest release](https://github.com/waterjugs/SYN-Vietnam-Seeder/releases/latest)
    and double-click it. Windows may say "Windows protected your PC"
    because the exe isn't code-signed: click **More info**, then
    **Run anyway**.
-2. Pick the time to seed each day and Steam or Epic, tick
+3. Pick the time to seed each day and Steam or Epic, tick
    **Seed automatically**, and press **Save**. That's it.
 
 It copies itself to `%LOCALAPPDATA%\SynSeeder` and adds a Windows
@@ -25,10 +30,6 @@ scheduled task called *SynSeeder*. The PC needs to be on, signed in and
 unlocked at that time (it runs late if the PC was asleep). Set the game to
 Borderless / Windowed Fullscreen so the seeder can see it. **Seed now** starts a run
 straight away and **Stop seeding** ends one and closes the game.
-
-Before the first run, start the game yourself once and finish the tutorial
-it opens for a new player (a new Epic copy can do this too, even if you've
-played on Steam). The seeder only knows the normal menus.
 
 ## What it does
 
