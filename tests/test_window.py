@@ -30,6 +30,7 @@ def calls(monkeypatch, tmp_path):
     monkeypatch.setattr(window, "_start_seed_process", lambda: made.append(("seed",)))
     monkeypatch.setattr(window.instance, "seeding_processes", lambda: [])
     monkeypatch.setattr(window.SetupWindow, "_load_server", lambda self: None)  # no thread, no network
+    monkeypatch.setattr(window.Game, "running", lambda self: False)
     return made
 
 
@@ -181,6 +182,27 @@ def test_seed_now_saves_then_starts(win, calls):
     win.seed_now()
     assert calls == [("schedule", "06:35"), ("seed",)]
     assert win.status.cget("text").startswith("Seeding started.")
+
+
+@pytest.mark.parametrize("count", [79, None])  # below 80, or the stats site unreachable
+def test_seed_now_starts_unless_the_count_says_seeded(win, calls, count):
+    win._show_server(count)
+    win.seed_now()
+    assert calls[-1] == ("seed",)
+
+
+def test_seed_now_when_the_server_is_already_seeded(win, calls):
+    win._show_server(84)
+    win.seed_now()
+    assert calls == [("schedule", "06:35")]  # settings saved, no run
+    assert win.status.cget("text") == "The server is already seeded (84 players), so there's nothing to do."
+
+
+def test_seed_now_when_the_game_is_open(win, calls, monkeypatch):
+    monkeypatch.setattr(window.Game, "running", lambda self: True)
+    win.seed_now()
+    assert calls == [("schedule", "06:35")]
+    assert win.status.cget("text").startswith("The game is already open.")
 
 
 def test_seed_now_when_already_seeding(win, calls, monkeypatch):
