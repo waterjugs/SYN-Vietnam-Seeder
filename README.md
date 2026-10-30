@@ -26,6 +26,10 @@ unlocked at that time (it runs late if the PC was asleep). Set the game to
 Borderless / Windowed Fullscreen so the seeder can see it. **Seed now** starts a run
 straight away and **Stop seeding** ends one and closes the game.
 
+Before the first run, start the game yourself once and finish the tutorial
+it opens for a new player (a new Epic copy can do this too, even if you've
+played on Steam). The seeder only knows the normal menus.
+
 ## What it does
 
 - Skips the whole run if the server is already seeded, unreachable, or if

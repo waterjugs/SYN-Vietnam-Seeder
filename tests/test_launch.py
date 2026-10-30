@@ -120,6 +120,10 @@ def test_launchers_and_other_games_are_not_the_game(running):
     assert not Game(Config())._matches(running)
 
 
+def test_a_null_process_name_means_any_hll_build():
+    assert Game(Config(process_name=None))._matches("HLLVietnamEpicGamesStore-Win64-Shipping.exe")
+
+
 def test_a_custom_process_name_is_matched_exactly():
     game_ = Game(Config(process_name="Other-Win64-Shipping.exe"))
     assert game_._matches("other-win64-shipping.exe")

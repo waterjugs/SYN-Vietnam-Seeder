@@ -59,7 +59,7 @@ class Game:
         self._alt_tapped = False  # force_to_front's Alt tap, used once per wait
 
     def _matches(self, name: str) -> bool:
-        wanted = self.config.process_name.lower()
+        wanted = (self.config.process_name or "").lower()  # a hand-edited null means any HLL build
         if not wanted:
             return bool(DEFAULT_PROCESS_PATTERN.match(name))
         if wanted in GAME_PROCESSES:  # the saved default, Steam's name, must also find the Epic game
