@@ -8,6 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import psutil
 
@@ -20,21 +21,31 @@ DEFAULT_PROCESS_PATTERN = re.compile(r"^HLL.*-Win64-Shipping\.exe$", re.IGNORECA
 EPIC_MANIFEST = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / (
     r"Epic\UnrealEngineLauncher\LauncherInstalled.dat"
 )
+EPIC_APP_NAME = "d7361b7d6fa94097bcadeac4b1f785fb"  # HLL Vietnam's AppName in the Epic store (2026-10-29)
 # Seconds without mouse or keyboard use before the seeder pulls the game in
 # front of whatever someone was doing; until then it waits for them.
 IDLE_BEFORE_TAKEOVER = 15
 
 
 def detect_epic_app_name(manifest: Path = EPIC_MANIFEST) -> str:
-    """Finds HLL Vietnam's Epic AppName from the launcher's install list."""
+    """Finds HLL Vietnam in the Epic launcher's install list, as namespace:item:app
+    like Epic's own shortcuts use, or "" when it isn't installed."""
     try:
         installs = json.loads(manifest.read_text(encoding="utf-8-sig"))["InstallationList"]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         return ""
-    for entry in installs:
-        location = entry.get("InstallLocation", "").lower().replace(" ", "")
-        if "hellletloose" in location and "vietnam" in location:
-            return entry.get("AppName", "")
+    if not isinstance(installs, list):
+        return ""
+
+    def by_folder(entry: dict) -> bool:  # Epic picks the folder name, e.g. Hell_Let_Loose_Vietnam
+        folder = re.sub(r"[^a-z0-9]", "", str(entry.get("InstallLocation", "")).lower())
+        return "hellletloose" in folder and "vietnam" in folder
+
+    for match in (lambda entry: entry.get("AppName") == EPIC_APP_NAME, by_folder):
+        for entry in installs:
+            if isinstance(entry, dict) and entry.get("AppName") and match(entry):
+                ids = [str(entry.get(key) or "") for key in ("NamespaceId", "ItemId", "AppName")]
+                return ":".join(ids) if all(ids) else ids[2]
     return ""
 
 
@@ -81,7 +92,7 @@ class Game:
             app = self.config.epic_app_name or detect_epic_app_name()
             if not app:
                 raise RuntimeError("Couldn't find HLL Vietnam in the Epic launcher")
-            return f"com.epicgames.launcher://apps/{app}?action=launch&silent=true"
+            return f"com.epicgames.launcher://apps/{quote(app, safe='')}?action=launch&silent=true"
         return f"steam://rungameid/{self.config.steam_app_id}"
 
     def launch(self, timeout: float | None = None) -> bool:

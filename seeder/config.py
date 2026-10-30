@@ -28,7 +28,7 @@ class Config:
     # How the game is started: "steam" or "epic"
     launcher: str = "steam"
     steam_app_id: int = 3079210
-    epic_app_name: str = ""  # found automatically when empty
+    epic_app_name: str = ""  # namespace:item:app or AppName; found automatically when empty
     process_name: str = "HLLVietnam-Win64-Shipping.exe"
 
     # Daily start time (24h, local time) used by the scheduled task
