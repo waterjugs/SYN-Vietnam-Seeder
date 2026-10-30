@@ -50,6 +50,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          docs="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME"
+          notes="Download SynSeeder.exe below and double-click it. See the README for setup.
+
+          By using SynSeeder you agree to its [Terms of Service]($docs/TERMS.md). The [Privacy Policy]($docs/PRIVACY.md) explains what it stores and sends."
           gh release create "${{ github.ref_name }}" dist/SynSeeder.exe \
             --title "SynSeeder ${{ github.ref_name }}" \
-            --notes "Download SynSeeder.exe below and double-click it. See the README for setup."
+            --notes "$notes"
