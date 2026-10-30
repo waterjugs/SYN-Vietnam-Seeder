@@ -42,7 +42,8 @@ def test_finds_vietnam_by_its_app_name_in_any_folder(installed, folder):
     assert detect_epic_app_name(installed(*FORTNITE, vietnam(folder))) == HLLV
 
 
-@pytest.mark.parametrize("folder", ["C:\\Epic Games\\HellLetLooseVietnam", "D:\\Hell Let Loose - Vietnam"])
+@pytest.mark.parametrize("folder", ["X:\\Epic Games\\Hell_Let_Loose_Vietnam", "C:\\Epic Games\\HellLetLooseVietnam",
+                                    "D:\\Hell Let Loose - Vietnam"])
 def test_falls_back_to_the_folder_name_if_the_app_name_changes(installed, folder):
     entry = vietnam(folder, app="0123456789abcdef0123456789abcdef")
     assert detect_epic_app_name(installed(*FORTNITE, entry)) == HLLV.replace(game.EPIC_APP_NAME, entry["AppName"])
@@ -83,10 +84,15 @@ def test_epic_launch_link_matches_epics_shortcuts(monkeypatch, installed):
         "%3Ad7361b7d6fa94097bcadeac4b1f785fb?action=launch&silent=true")
 
 
-def test_epic_app_name_from_settings_wins(monkeypatch):
+@pytest.mark.parametrize("setting, link", [
+    ("SomeApp", "SomeApp"),
+    (HLLV, HLLV.replace(":", "%3A")),
+    (" " + HLLV.replace(":", "%3A") + " ", HLLV.replace(":", "%3A")),  # copied from a shortcut: not encoded twice
+])
+def test_epic_app_name_from_settings_wins(monkeypatch, setting, link):
     monkeypatch.setattr(game, "detect_epic_app_name", lambda: pytest.fail("shouldn't look"))
-    assert Game(Config(launcher="epic", epic_app_name="SomeApp")).launch_uri() == (
-        "com.epicgames.launcher://apps/SomeApp?action=launch&silent=true")
+    assert Game(Config(launcher="epic", epic_app_name=setting)).launch_uri() == (
+        f"com.epicgames.launcher://apps/{link}?action=launch&silent=true")
 
 
 def test_epic_without_the_game_installed(monkeypatch):

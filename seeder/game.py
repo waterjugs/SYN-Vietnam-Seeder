@@ -8,7 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import psutil
 
@@ -92,7 +92,8 @@ class Game:
             app = self.config.epic_app_name or detect_epic_app_name()
             if not app:
                 raise RuntimeError("Couldn't find HLL Vietnam in the Epic launcher")
-            return f"com.epicgames.launcher://apps/{quote(app, safe='')}?action=launch&silent=true"
+            # unquote first: a value copied from an Epic shortcut already has %3A in it
+            return f"com.epicgames.launcher://apps/{quote(unquote(app.strip()), safe='')}?action=launch&silent=true"
         return f"steam://rungameid/{self.config.steam_app_id}"
 
     def launch(self, timeout: float | None = None) -> bool:
