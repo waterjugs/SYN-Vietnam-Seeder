@@ -1,4 +1,4 @@
-"""How the game is started through Steam or the Epic launcher."""
+"""How the game is started and found, through Steam or the Epic launcher."""
 
 import json
 
@@ -103,3 +103,24 @@ def test_epic_without_the_game_installed(monkeypatch):
 
 def test_steam_launch_link():
     assert Game(Config()).launch_uri() == "steam://rungameid/3079210"
+
+
+@pytest.mark.parametrize("process_name", ["HLLVietnam-Win64-Shipping.exe",
+                                          "HLLVietnamEpicGamesStore-Win64-Shipping.exe", ""])
+@pytest.mark.parametrize("running", ["HLLVietnam-Win64-Shipping.exe",  # Steam
+                                     "HLLVietnamEpicGamesStore-Win64-Shipping.exe"])  # Epic
+def test_finds_the_game_from_either_store(process_name, running):
+    # Every saved config.json has Steam's name, and Epic's build runs under another one
+    assert Game(Config(process_name=process_name))._matches(running)
+
+
+@pytest.mark.parametrize("running", ["Launch_HLL.exe", "HLLVietnamEpicGamesStore.exe", "start_protected_game.exe",
+                                     "HLL-Win64-Shipping.exe"])  # Epic's launcher stub, EAC, the original HLL
+def test_launchers_and_other_games_are_not_the_game(running):
+    assert not Game(Config())._matches(running)
+
+
+def test_a_custom_process_name_is_matched_exactly():
+    game_ = Game(Config(process_name="Other-Win64-Shipping.exe"))
+    assert game_._matches("other-win64-shipping.exe")
+    assert not game_._matches("HLLVietnamEpicGamesStore-Win64-Shipping.exe")
