@@ -18,6 +18,9 @@ log = logging.getLogger(__name__)
 
 # Used when config.process_name is blank: any HLL build.
 DEFAULT_PROCESS_PATTERN = re.compile(r"^HLL.*-Win64-Shipping\.exe$", re.IGNORECASE)
+# HLL Vietnam's game process in the Steam and the Epic build (seen 2026-10-30). A
+# process_name of either means the game from whichever store started it.
+GAME_PROCESSES = {"hllvietnam-win64-shipping.exe", "hllvietnamepicgamesstore-win64-shipping.exe"}
 EPIC_MANIFEST = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / (
     r"Epic\UnrealEngineLauncher\LauncherInstalled.dat"
 )
@@ -56,9 +59,12 @@ class Game:
         self._alt_tapped = False  # force_to_front's Alt tap, used once per wait
 
     def _matches(self, name: str) -> bool:
-        if self.config.process_name:
-            return name.lower() == self.config.process_name.lower()
-        return bool(DEFAULT_PROCESS_PATTERN.match(name))
+        wanted = self.config.process_name.lower()
+        if not wanted:
+            return bool(DEFAULT_PROCESS_PATTERN.match(name))
+        if wanted in GAME_PROCESSES:  # the saved default, Steam's name, must also find the Epic game
+            return name.lower() in GAME_PROCESSES
+        return name.lower() == wanted
 
     def process(self) -> psutil.Process | None:
         for proc in psutil.process_iter(["name"]):
